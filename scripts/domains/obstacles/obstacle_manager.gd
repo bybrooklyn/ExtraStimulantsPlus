@@ -461,8 +461,7 @@ func _tick_obstacle_animation(obs: Node3D, delta: float, apply_offset: bool) -> 
         return
     if absf(slide_offset) <= 0.001:
         return
-    var axis: String = obs.slide_axis
-    if axis == "x":
+    if obs.slide_axis == 0:
         obs.position.x += slide_offset
     else:
         obs.position.z += slide_offset
@@ -651,7 +650,7 @@ func _update_obstacle_transforms(_delta: float, time_data: Dictionary = {}) -> v
 
 
         if has_any_deform:
-            var deform: = TunnelDeformUtil.compute_center_offset_typed(
+            TunnelDeformUtil.apply_deform_to_obstacle(
                 ring_raw, wrapped_ring, world_y, last_cam_y, 
                 eff_wobble, cur_wobble_time, 
                 eff_helix, cur_helix_time, t_helix_freq, 
@@ -666,34 +665,15 @@ func _update_obstacle_transforms(_delta: float, time_data: Dictionary = {}) -> v
                 eff_rp, t_rp_obstacles, 
                 eff_react, t_pr_obstacles, t_pr_start, 
                 eff_ripple, cur_ripple_time, 
-                _player_off2)
-
-            var center_offset: Vector2 = deform["center"]
-            rot_offset += deform["rot"]
-
-            obs.scale = Vector3.ONE * deform["scale"]
-
-
-            var s: Vector3 = obs.scale
-            var b: Basis = Basis(Vector3.RIGHT, deform["angle_x"]) * Basis(Vector3.UP, - rot_offset)
-            obs.basis = b.scaled(s)
-
-
-            if deform["expansion"] != 1.0:
-                obs.scale *= deform["expansion"]
-
-            obs.position.x = center_offset.x
-            obs.position.z = center_offset.y
-
-
-            if deform["y_offset"] != 0.0:
-                var base_y: float = obs.base_y
-                obs.position.y = base_y + deform["y_offset"]
+                _player_off2,
+                obs,
+                rot_offset
+            )
         else:
-
             obs.scale = Vector3.ONE
             obs.position.x = 0.0
             obs.position.z = 0.0
+            obs.rotation.y = - rot_offset
 
 
         if has_anim:

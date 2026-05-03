@@ -54,18 +54,15 @@ Those scripts inject the same loose override files into the exported Android ass
 - top-right version badge on the main menu
 - custom maps menu entry on the main menu
 - in-game level editor with dropdown selection for Themes and Songs
+- professional editor tools: Multi-select, Group Dragging, Undo/Redo (Ctrl+Z/Y)
+- rhythmic workflow: BPM beat markers and Ring Snapping
+- level prefabs: Copy/Paste groups of obstacles (Ctrl+C/V)
 - in-game custom map browser with a Details Panel (Theme/Song/Obstacle count)
-- custom obstacle creator with a clickable grid editor
 - support for external music files (.ogg, .mp3, .wav) in `user://custom_music/`
-- "Play Test" button in the Level Editor for instant feedback
+- "Play Test" button and Auto-Backup in the Level Editor
+- ultrawide display support (21:9, 32:9) with corrected FOV and responsive UI
 - shareable `.somap` map format with import/export support
-- legacy `.json` map import still supported
-- theme and song metadata saved with custom maps
-- ExtraStimulantsPlus settings entry reachable from the normal settings screen
-- Android compatibility renderer override
-- lower allocation tunnel deformation path
-- lower allocation tunnel chunk generation path
-- obstacle update optimizations using typed state instead of metadata churn
+- built-in mod loader with `mod.json` metadata and strict dependency checking
 
 ## Custom Map Format
 

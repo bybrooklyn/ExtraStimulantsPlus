@@ -15,7 +15,7 @@ var animation_type: String = ""
 var animation_speed: float = 40.0
 var animation_phase: float = 0.0
 var slide_amplitude: float = 8.0
-var slide_axis: String = "z"
+var slide_axis: int = 1 # 0: x, 1: z
 var slide_position_offset: float = 0.0
 
 var pulse_enabled: bool = false
