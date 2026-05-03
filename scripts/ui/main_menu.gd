@@ -111,8 +111,17 @@ func _add_extra_stimulants_plus_badge() -> void:
     add_child(box)
 
     if ExtraStimulantsPlusSettings.should_show_version_badge():
+        var active_label := Label.new()
+        active_label.text = "EXTRASTIMULANTSPLUS ACTIVE"
+        active_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+        active_label.add_theme_font_size_override("font_size", 24)
+        active_label.add_theme_color_override("font_color", Color(0.1, 1.0, 0.4, 1.0))
+        active_label.add_theme_constant_override("outline_size", 4)
+        active_label.add_theme_color_override("font_outline_color", Color.BLACK)
+        box.add_child(active_label)
+
         var version_label := Label.new()
-        version_label.text = "ExtraStimulantsPlus %s" % ExtraStimulantsPlusSettings.get_version()
+        version_label.text = "Build %s" % ExtraStimulantsPlusSettings.get_version()
         version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
         version_label.add_theme_font_size_override("font_size", 18)
         version_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4, 0.95))

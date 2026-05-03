@@ -1,91 +1,62 @@
-# ExtraStimulantsPlus
+# 🚀 ExtraStimulantsPlus v0.0.1
 
-`VERSION`: `v0.0.1`
+Professional toolkit and performance booster for Sensory Overload.
 
-ExtraStimulantsPlus is a drop-in mod layer for Sensory Overload focused on three things:
+---
 
-- better performance, especially on weaker PCs and Android devices
-- a native in-game custom map workflow
-- simple mod installation that is easy to undo
+## ⚡ QUICK START: How to install (PC)
 
-## License
+If you see **"EXTRASTIMULANTSPLUS ACTIVE"** in green on the main menu, it's working!
 
-**Read `LICENSE` before redistributing this mod.**
+1.  Find your game folder (where `SensoryOverload.exe` is).
+2.  **Copy everything** from this mod folder directly into that game folder.
+3.  Your game folder should now look like this:
+    *   `SensoryOverload.exe`
+    *   `SensoryOverload.pck`
+    *   **`override.cfg`** (Added by mod)
+    *   **`scripts/`** (Added by mod)
+    *   **`scenes/`** (Added by mod)
+    *   **`addons/`** (Added by mod)
+    *   **`VERSION`** (Added by mod)
+4.  Launch the game. That's it!
 
-**The mod code in this package is shipped with the included GPLv3 license text.**
+**To Uninstall:** Simply delete the files/folders highlighted in **bold** above. Your game will return to 100% vanilla.
 
-**This package does not grant any right to redistribute the original game's copyrighted assets.**
+---
 
-Share only the loose mod files in this package, not the base game.
+## 🛠 Features
 
-## Installation
+### 🎨 Pro Level Editor
+- **Modern UX:** Multi-select (`Shift+Click`), Group Dragging, and full Undo/Redo (`Ctrl+Z/Y`).
+- **Power Tools:** Copy/Paste prefabs (`Ctrl+C/V`), Delete, and Nudge items.
+- **Rhythmic Sync:** Set BPM to see visual beat markers on the timeline.
+- **Precision:** Ring Snapping (snap to 5, 10, or 20 rings).
+- **Instant Testing:** One-click "Play Test" button and Auto-Backup safety.
 
-### PC
+### 🗺 Custom Maps & Sharing
+- **Custom Map Browser:** Explore your maps with a details panel (Themes, Songs, Stats).
+- **External Music:** Drop `.mp3`, `.ogg`, or `.wav` into `user://custom_music/`.
+- **Easy Sharing:** Uses the new `.somap` format for single-file map sharing.
 
-Copy these loose files and folders next to the game's executable:
+### ⚙️ Performance & Display
+- **Ultrawide Support:** Automatic FOV correction for 21:9 and 32:9 monitors.
+- **Responsive UI:** Menus that scale and anchor correctly on any screen size.
+- **Optimization:** Rewritten deformation loops for lower CPU usage and zero memory churn.
 
-- `override.cfg`
-- `VERSION`
-- `LICENSE`
-- `scripts/`
-- `scenes/`
-- `addons/`
+### 📦 Mod Management
+- **Metadata Support:** Mods now show Author, Version, and Description via `mod.json`.
+- **Dependency Check:** Ensures required mods are loaded to prevent crashes.
 
-That is enough for Godot to pick up the mod.
+---
 
-### Uninstall / Revert
+## 📜 License & Legal
 
-Delete the same loose files and folders listed above.
+- **Software:** The mod code is licensed under **GPLv3** (see `LICENSE`).
+- **Assets:** This package contains **NO** original game assets. You must own Sensory Overload to use this mod.
+- **Redistribution:** You may share this mod freely, but do **not** include the base game's `.pck` or `.exe` files.
 
-The original packed game data is left untouched, so uninstalling the mod is just removing the loose override files.
+---
 
-### Android
+## 📱 Android Installation
 
-Use the included install scripts from the workspace root if you want to patch an APK:
-
-- `install.sh`
-- `install.bat`
-
-Those scripts inject the same loose override files into the exported Android asset layout.
-
-## Features
-
-- built-in mod loader that mounts `.pck` packs from `user://mods/`
-- top-right version badge on the main menu
-- custom maps menu entry on the main menu
-- in-game level editor with dropdown selection for Themes and Songs
-- professional editor tools: Multi-select, Group Dragging, Undo/Redo (Ctrl+Z/Y)
-- rhythmic workflow: BPM beat markers and Ring Snapping
-- level prefabs: Copy/Paste groups of obstacles (Ctrl+C/V)
-- in-game custom map browser with a Details Panel (Theme/Song/Obstacle count)
-- support for external music files (.ogg, .mp3, .wav) in `user://custom_music/`
-- "Play Test" button and Auto-Backup in the Level Editor
-- ultrawide display support (21:9, 32:9) with corrected FOV and responsive UI
-- shareable `.somap` map format with import/export support
-- built-in mod loader with `mod.json` metadata and strict dependency checking
-
-## Custom Map Format
-
-ExtraStimulantsPlus uses `.somap` as the default share format.
-
-- create or edit maps in the level editor
-- export them as `user://custom_levels/<name>.somap`
-- share the `.somap` file directly
-- other players can drop the file into their own `user://custom_levels/` folder and play it from the `CUSTOM MAPS` menu
-
-Legacy `.json` scripted sequences can still be imported into the editor.
-
-## Mod Settings
-
-The mod adds its own settings popup inside the normal settings screen for:
-
-- showing or hiding the version badge
-- showing or hiding the loaded-mod count
-- preferring `.somap` when exporting maps
-- forcing the level editor menu entry to stay visible
-
-## Notes
-
-- PC installation is meant to be drag-and-drop and reversible.
-- Android installation is still more involved because APKs must be rebuilt and resigned.
-- This package intentionally excludes the original game's assets.
+Use the included `install.sh` (Linux/Mac) or `install.bat` (Windows) in the root directory. You will need `apktool` and `apksigner` installed.
