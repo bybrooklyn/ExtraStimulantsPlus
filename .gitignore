@@ -1,0 +1,11 @@
+# Godot-specific ignores
+.godot/
+*.uid
+
+# Sample/test files
+_runtime_selected.json
+_editor_test.json
+
+# OS-specific
+.DS_Store
+Thumbs.db
