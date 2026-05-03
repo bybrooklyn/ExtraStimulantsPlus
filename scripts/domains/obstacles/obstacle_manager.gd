@@ -575,6 +575,14 @@ func _update_obstacle_transforms(_delta: float, time_data: Dictionary = {}) -> v
 
     var _player_off2: = Vector2(player_offset_x, player_offset_z)
 
+    # Turbo Optimization: Pre-calculate music pulse for the entire loop
+    var precomputed_pulse: float = 0.0
+    var settings = get_node_or_null("/root/ExtraStimulantsPlusSettings")
+    if settings and settings.is_deformation_reactivity_enabled():
+        var visualizer = get_node_or_null("/root/AudioVisualizer")
+        if visualizer:
+            precomputed_pulse = visualizer.get_bass_pulse() * settings.get_reactivity_intensity()
+
     for obs in active_obstacles:
         var world_y: float = obs.position.y
 
@@ -667,7 +675,8 @@ func _update_obstacle_transforms(_delta: float, time_data: Dictionary = {}) -> v
                 eff_ripple, cur_ripple_time, 
                 _player_off2,
                 obs,
-                rot_offset
+                rot_offset,
+                precomputed_pulse
             )
         else:
             obs.scale = Vector3.ONE
@@ -849,6 +858,12 @@ func _release_to_pool(container: Node3D) -> bool:
 func _reset_pooled_obstacle(container: Node3D, new_color: Color) -> void :
     container.transform = Transform3D.IDENTITY
     container.visible = true
+    
+    # Clear Turbo properties
+    container.hit_box_positions = PackedVector3Array()
+    container.hit_box_half_size = Vector3.ZERO
+    container.collision_area = null
+
     for child in container.get_children():
         if child is Area3D:
             child.collision_layer = 0 if ghost_mode else 4
@@ -967,7 +982,7 @@ func prewarm_all_obstacle_types() -> void :
             freed += 1
 
     var dt_ms: int = Time.get_ticks_msec() - t0_msec
-    print("ObstacleManager: prewarm complete in %d ms — pooled=%d, freed=%d, skipped=%d %s" % [
+    print("ObstacleManager: prewarm complete in %d ms - pooled=%d, freed=%d, skipped=%d %s" % [
         dt_ms, pooled, freed, skipped.size(), 
         ("(skipped: " + ", ".join(skipped) + ")") if not skipped.is_empty() else "", 
     ])
@@ -1980,10 +1995,7 @@ func _build_multimesh(data: Array, mesh: Mesh, mat: Material) -> Node3D:
     area.monitoring = not ghost_mode
     area.add_to_group("Obstacles")
     container.add_child(area)
-
-
-
-
+    container.collision_area = area
 
 
     var shared_cube_shape: BoxShape3D = null
@@ -2013,8 +2025,8 @@ func _build_multimesh(data: Array, mesh: Mesh, mat: Material) -> Node3D:
 
 
 
-    area.set_meta("hit_box_positions", hit_positions)
-    area.set_meta("hit_box_half_size", Vector3.ONE * (0.5 * config.cube_size))
+    container.hit_box_positions = hit_positions
+    container.hit_box_half_size = Vector3.ONE * (0.5 * config.cube_size)
     _log_spawn_step("_build_multimesh(cubes=%d)" % data.size(), _bm_t0)
     return container
 
@@ -2037,97 +2049,59 @@ func check_sphere_hit(global_pos: Vector3, radius: float, sweep_prev_pos: Vector
             continue
 
         if do_sweep:
-
-
-
             var end_rel_y: float = global_pos.y - obs.position.y
             var start_rel_y: float = end_rel_y + sweep_total_move
-
 
             if end_rel_y > _HIT_CHECK_Y_PROXIMITY or start_rel_y < - _HIT_CHECK_Y_PROXIMITY:
                 continue
 
-
             var t: float = clampf(start_rel_y / sweep_total_move, 0.0, 1.0)
-
-
             var interp_pos: Vector3 = sweep_prev_pos.lerp(global_pos, t)
 
-            var result: Dictionary = _check_hit_in_node(obs, interp_pos, radius_sq)
+            var result: Dictionary = _check_hit_direct(obs, interp_pos, radius_sq)
             if not result.is_empty():
                 return result
         else:
-
             if absf(global_pos.y - obs.position.y) > _HIT_CHECK_Y_PROXIMITY:
                 continue
-            var result: Dictionary = _check_hit_in_node(obs, global_pos, radius_sq)
+            var result: Dictionary = _check_hit_direct(obs, global_pos, radius_sq)
             if not result.is_empty():
                 return result
 
     return {}
 
 
+func _check_hit_direct(obs: ObstacleInstance, global_pos: Vector3, radius_sq: float) -> Dictionary:
+    var area: = obs.collision_area
+    if not area or area.collision_layer == 0:
+        return {}
+        
+    var area_xform: Transform3D = area.global_transform
+    var player_local: Vector3 = area_xform.affine_inverse() * global_pos
+    var px: float = player_local.x
+    var pz: float = player_local.z
 
+    var positions: PackedVector3Array = obs.hit_box_positions
+    if positions.size() > 0:
+        var hs: Vector3 = obs.hit_box_half_size
+        var hx: float = hs.x
+        var hy: float = hs.y
+        var hz: float = hs.z
+        for i in range(positions.size()):
+            var cp: Vector3 = positions[i]
+            var dx: float = maxf(0.0, absf(px - cp.x) - hx)
+            var dz: float = maxf(0.0, absf(pz - cp.z) - hz)
+            if dx * dx + dz * dz < radius_sq:
+                var nearest_local: = Vector3(
+                    clampf(player_local.x, cp.x - hx, cp.x + hx), 
+                    clampf(player_local.y, cp.y - hy, cp.y + hy), 
+                    clampf(player_local.z, cp.z - hz, cp.z + hz)
+                )
+                return {"area": area, "contact": area_xform * nearest_local}
+        return {}
 
-
-
-
-
-
-func _check_hit_in_node(node: Node, global_pos: Vector3, radius_sq: float) -> Dictionary:
-    for child in node.get_children():
-        if child is Area3D:
-            var area: = child as Area3D
-            if area.collision_layer == 0:
-                continue
-            var area_xform: Transform3D = area.global_transform
-            var player_local: Vector3 = area_xform.affine_inverse() * global_pos
-            var px: float = player_local.x
-            var pz: float = player_local.z
-
-
-            var positions: PackedVector3Array = area.get_meta("hit_box_positions")
-            if positions.size() > 0:
-                var hs: Vector3 = area.get_meta("hit_box_half_size")
-                var hx: float = hs.x
-                var hy: float = hs.y
-                var hz: float = hs.z
-                for i in range(positions.size()):
-                    var cp: Vector3 = positions[i]
-                    var dx: float = maxf(0.0, absf(px - cp.x) - hx)
-                    var dz: float = maxf(0.0, absf(pz - cp.z) - hz)
-                    if dx * dx + dz * dz < radius_sq:
-                        var nearest_local: = Vector3(
-                            clampf(player_local.x, cp.x - hx, cp.x + hx), 
-                            clampf(player_local.y, cp.y - hy, cp.y + hy), 
-                            clampf(player_local.z, cp.z - hz, cp.z + hz)
-                        )
-                        return {"area": area, "contact": area_xform * nearest_local}
-                continue
-
-
-            for col_node in area.get_children():
-                if col_node is CollisionShape3D:
-                    var shape = col_node.shape
-                    if shape is BoxShape3D:
-                        var hx_f: float = shape.size.x * 0.5
-                        var hy_f: float = shape.size.y * 0.5
-                        var hz_f: float = shape.size.z * 0.5
-                        var cp_f: Vector3 = col_node.position
-                        var dx_f: float = maxf(0.0, absf(px - cp_f.x) - hx_f)
-                        var dz_f: float = maxf(0.0, absf(pz - cp_f.z) - hz_f)
-                        if dx_f * dx_f + dz_f * dz_f < radius_sq:
-                            var nearest_local_f: = Vector3(
-                                clampf(player_local.x, cp_f.x - hx_f, cp_f.x + hx_f), 
-                                clampf(player_local.y, cp_f.y - hy_f, cp_f.y + hy_f), 
-                                clampf(player_local.z, cp_f.z - hz_f, cp_f.z + hz_f)
-                            )
-                            return {"area": area, "contact": area_xform * nearest_local_f}
-        elif child is Node3D:
-            var result: Dictionary = _check_hit_in_node(child, global_pos, radius_sq)
-            if not result.is_empty():
-                return result
-    return {}
+    # Fallback to children search if somehow properties are missing (e.g. legacy/source)
+    return _check_hit_in_node(obs, global_pos, radius_sq)
 
 
 
@@ -2176,17 +2150,15 @@ func _closest_area_dist_sq(node: Node, global_pos: Vector3, cap_sq: float) -> Di
 
 func _walk_for_closest_area(node: Node, current_area: Area3D, global_pos: Vector3, state: Array) -> void :
     var area_for_children: Area3D = current_area
-    if node is Area3D:
-        area_for_children = node as Area3D
-
-        if area_for_children.collision_layer == 0:
+    if node is ObstacleInstance:
+        var obs: = node as ObstacleInstance
+        area_for_children = obs.collision_area
+        if not area_for_children or area_for_children.collision_layer == 0:
             return
 
-
-
-        var positions: PackedVector3Array = area_for_children.get_meta("hit_box_positions")
+        var positions: PackedVector3Array = obs.hit_box_positions
         if positions.size() > 0:
-            var hs_fast: Vector3 = area_for_children.get_meta("hit_box_half_size")
+            var hs_fast: Vector3 = obs.hit_box_half_size
             var hx: float = hs_fast.x
             var hy: float = hs_fast.y
             var hz: float = hs_fast.z
@@ -2204,6 +2176,13 @@ func _walk_for_closest_area(node: Node, current_area: Area3D, global_pos: Vector
                     state[0] = d_sq
                     state[1] = area_for_children
             return
+    
+    # Generic node traversal for non-ObstacleInstance cases (e.g. debris)
+    if node is Area3D:
+        area_for_children = node as Area3D
+        if area_for_children.collision_layer == 0:
+            return
+
     for child in node.get_children():
         if child is CollisionShape3D and area_for_children:
             var col: = child as CollisionShape3D
@@ -2248,34 +2227,33 @@ func closest_point_on_collider(node: Node3D, player_global_pos: Vector3) -> Vect
 
 
 func _collect_closest_point_recursive(node: Node, player_global_pos: Vector3, state: Array) -> void :
+    if node is ObstacleInstance:
+        var obs: = node as ObstacleInstance
+        var area: = obs.collision_area
+        if not area: return
+        
+        var positions: PackedVector3Array = obs.hit_box_positions
+        if positions.size() > 0:
+            var hs_fast: Vector3 = obs.hit_box_half_size
+            var hx: float = hs_fast.x
+            var hy: float = hs_fast.y
+            var hz: float = hs_fast.z
+            var area_xform: Transform3D = area.global_transform
+            var local_player_fast: Vector3 = area_xform.affine_inverse() * player_global_pos
+            for i in range(positions.size()):
+                var cp: Vector3 = positions[i]
+                var nearest_local_fast: = Vector3(
+                    clampf(local_player_fast.x, cp.x - hx, cp.x + hx), 
+                    clampf(local_player_fast.y, cp.y - hy, cp.y + hy), 
+                    clampf(local_player_fast.z, cp.z - hz, cp.z + hz)
+                )
+                var d_sq_fast: = nearest_local_fast.distance_squared_to(local_player_fast)
+                if d_sq_fast < state[0]:
+                    state[0] = d_sq_fast
+                    state[1] = area_xform * nearest_local_fast
+            return
+
     for child in node.get_children():
-        if child is Area3D:
-
-
-            var area: = child as Area3D
-            var positions: PackedVector3Array = area.get_meta("hit_box_positions")
-            if positions.size() > 0:
-                var hs_fast: Vector3 = area.get_meta("hit_box_half_size")
-                var hx: float = hs_fast.x
-                var hy: float = hs_fast.y
-                var hz: float = hs_fast.z
-                var area_xform: Transform3D = area.global_transform
-                var local_player_fast: Vector3 = area_xform.affine_inverse() * player_global_pos
-                for i in range(positions.size()):
-                    var cp: Vector3 = positions[i]
-                    var nearest_local_fast: = Vector3(
-                        clampf(local_player_fast.x, cp.x - hx, cp.x + hx), 
-                        clampf(local_player_fast.y, cp.y - hy, cp.y + hy), 
-                        clampf(local_player_fast.z, cp.z - hz, cp.z + hz)
-                    )
-                    var d_sq_fast: = nearest_local_fast.distance_squared_to(local_player_fast)
-                    if d_sq_fast < state[0]:
-                        state[0] = d_sq_fast
-                        state[1] = area_xform * nearest_local_fast
-                continue
-
-            _collect_closest_point_recursive(area, player_global_pos, state)
-            continue
         if child is CollisionShape3D:
             var col: = child as CollisionShape3D
             var shape = col.shape

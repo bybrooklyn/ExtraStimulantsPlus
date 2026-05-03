@@ -45,3 +45,8 @@ var _swap_preview_idx: int = -1
 
 var pool_type_id: String = ""
 var pool_last_color: Color = Color.BLACK
+
+# Turbo Optimization Properties
+var hit_box_positions: PackedVector3Array = PackedVector3Array()
+var hit_box_half_size: Vector3 = Vector3.ZERO
+var collision_area: Area3D = null

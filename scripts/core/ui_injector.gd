@@ -6,9 +6,23 @@ extends Node
 func _enter_tree():
     get_tree().node_added.connect(_on_node_added)
 
+var _active_badge: Control
+
+func _process(_delta):
+    if _active_badge and _active_badge.is_inside_tree() and _active_badge.visible:
+        var visualizer = get_node_or_null("/root/AudioVisualizer")
+        if visualizer:
+            var pulse = visualizer.get_bass_pulse()
+            # Scale from 1.0 to 1.1 based on bass
+            var s = 1.0 + (pulse * 0.1)
+            _active_badge.scale = Vector2(s, s)
+            # Adjust pivot to keep it anchored to the top-right
+            _active_badge.pivot_offset = Vector2(_active_badge.size.x, 0)
+
 func _on_node_added(node: Node):
     # Detect Main Menu
     if node.name == "MainMenu" and node is Control:
+        _active_badge = null # Reset ref
         _patch_main_menu(node)
     
     # Detect Settings Menu
@@ -61,10 +75,13 @@ func _inject_custom_maps_button(container: VBoxContainer):
 
 
 func _inject_active_badge(menu: Control):
-    if menu.has_node("ExtraStimulantsPlusBadge"): return
+    if menu.has_node("ExtraStimulantsPlusBadge"): 
+        _active_badge = menu.get_node("ExtraStimulantsPlusBadge")
+        return
     
     var box = VBoxContainer.new()
     box.name = "ExtraStimulantsPlusBadge"
+    _active_badge = box
     box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
     box.offset_left = -420
     box.offset_top = 18
@@ -73,7 +90,7 @@ func _inject_active_badge(menu: Control):
     menu.add_child(box)
     
     var active_label = Label.new()
-    active_label.text = "EXTRASTIMULANTSPLUS ACTIVE"
+    active_label.text = "ExtraStimulantsPlus Active"
     active_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
     active_label.add_theme_font_size_override("font_size", 24)
     active_label.add_theme_color_override("font_color", Color(0.1, 1.0, 0.4, 1.0))
@@ -114,7 +131,7 @@ func _inject_settings_row(container: VBoxContainer, settings_menu: Control):
     container.add_child(HSeparator.new())
     
     var title = Label.new()
-    title.text = "EXTRASTIMULANTSPLUS"
+    title.text = "ExtraStimulantsPlus"
     title.add_theme_font_size_override("font_size", 18)
     title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
     container.add_child(title)
@@ -135,6 +152,34 @@ func _inject_settings_row(container: VBoxContainer, settings_menu: Control):
     row.add_child(button)
     
     container.add_child(row)
+    
+    # Add Mod Manager Button
+    var mgr_row = HBoxContainer.new()
+    mgr_row.name = "ModManagerRow"
+    
+    var mgr_label = Label.new()
+    mgr_label.text = "Manage all mods"
+    mgr_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    mgr_label.add_theme_font_size_override("font_size", 22)
+    mgr_row.add_child(mgr_label)
+    
+    var mgr_button = Button.new()
+    mgr_button.text = "Manage"
+    mgr_button.custom_minimum_size = Vector2(120, 36)
+    mgr_button.pressed.connect(_open_mod_manager.bind(settings_menu))
+    mgr_row.add_child(mgr_button)
+    
+    container.add_child(mgr_row)
+
+func _open_mod_manager(parent: Control):
+    if get_node_or_null("/root/UiSfxManager"):
+        get_node("/root/UiSfxManager").play_click()
+    
+    var mgr_script = load("res://scripts/ui/mod_manager_menu.gd")
+    if mgr_script:
+        var mgr = mgr_script.new()
+        parent.add_child(mgr)
+        mgr.popup_centered()
 
 func _open_mod_settings(parent: Control):
     var settings = get_node_or_null("/root/ExtraStimulantsPlusSettings")

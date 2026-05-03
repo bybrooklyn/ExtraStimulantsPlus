@@ -1,20 +1,5 @@
 class_name TunnelDeformUtil
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 const RESULT_TEMPLATE: = {
     "center": Vector2.ZERO, 
     "scale": 1.0, 
@@ -23,33 +8,6 @@ const RESULT_TEMPLATE: = {
     "y_offset": 0.0, 
     "expansion": 1.0, 
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 static func compute_center_offset(
     ring_raw: float, 
@@ -62,6 +20,8 @@ static func compute_center_offset(
     player_offset: Vector2 = Vector2.ZERO, 
     _ring_origin_offset: float = 0.0, 
     twist_dist_baked: bool = false, 
+    out_dict: Dictionary = {},
+    precomputed_pulse: float = 0.0
 ) -> Dictionary:
     var center: = Vector2.ZERO
     var total_scale: = 1.0
@@ -70,20 +30,21 @@ static func compute_center_offset(
     var y_off: = 0.0
     var expansion: = 1.0
 
+    var deform_mult: = 1.0 + precomputed_pulse
 
     var e_wobble: float = eff.get("wobble_amount", 0.0)
     if absf(e_wobble) > 0.001:
         var phase: float = - wrapped_ring * 0.104719755 + tmr.get("wobble_time", 0.0)
-        center.x += sin(phase) * e_wobble
-        center.y += cos(phase * 1.25) * e_wobble
+        center.x += sin(phase) * e_wobble * deform_mult
+        center.y += cos(phase * 1.25) * e_wobble * deform_mult
 
 
     var e_helix: float = eff.get("helix_amount", 0.0)
     if absf(e_helix) > 0.001:
         var helix_freq: float = eff.get("helix_frequency", 1.0)
         var phase: float = wrapped_ring * helix_freq + tmr.get("helix_time", 0.0)
-        center.x += sin(phase) * e_helix
-        center.y += cos(phase) * e_helix
+        center.x += sin(phase) * e_helix * deform_mult
+        center.y += cos(phase) * e_helix * deform_mult
 
 
     var e_mobius: float = eff.get("mobius_amount", 0.0)
@@ -96,9 +57,8 @@ static func compute_center_offset(
     var e_twist: float = eff.get("tunnel_twist", 0.0)
     if absf(e_twist) > 0.001:
         var wave_angle: float = - wrapped_ring * 0.020943951 + tmr.get("twist_time", 0.0)
-        var max_off: float = e_twist * 4.0
+        var max_off: float = e_twist * 4.0 * deform_mult
         if twist_dist_baked:
-
             center.x += sin(wave_angle) * max_off
             center.y += cos(wave_angle * 1.25) * max_off
         else:
@@ -150,7 +110,6 @@ static func compute_center_offset(
             var norm_dist: float = clampf(dist / 250.0, 0.0, 1.0)
             var curve_weight: float = pow(norm_dist, 2.2)
             center.y -= curve_weight * e_curve * 120.0
-
             var slope: float = (e_curve * 120.0 * 2.2 / 250.0) * pow(norm_dist, 1.2)
             angle_x = atan(slope)
 
@@ -190,24 +149,23 @@ static func compute_center_offset(
         center.x += sin(phase) * e_ripple
         center.y += cos(phase * 0.8) * e_ripple
 
-    return {
-        "center": center, 
-        "scale": total_scale, 
-        "rot": rot, 
-        "angle_x": angle_x, 
-        "y_offset": y_off, 
-        "expansion": expansion, 
-    }
-
-
-
-
-
-
-
-
-
-
+    if out_dict.is_empty():
+        return {
+            "center": center, 
+            "scale": total_scale, 
+            "rot": rot, 
+            "angle_x": angle_x, 
+            "y_offset": y_off, 
+            "expansion": expansion, 
+        }
+    else:
+        out_dict["center"] = center
+        out_dict["scale"] = total_scale
+        out_dict["rot"] = rot
+        out_dict["angle_x"] = angle_x
+        out_dict["y_offset"] = y_off
+        out_dict["expansion"] = expansion
+        return out_dict
 
 static func apply_deform_to_obstacle(
     ring_raw: float, 
@@ -229,7 +187,8 @@ static func apply_deform_to_obstacle(
     e_ripple: float, t_ripple: float, 
     player_offset: Vector2, 
     obs: Node3D,
-    initial_rot_offset: float
+    initial_rot_offset: float,
+    precomputed_pulse: float = 0.0
 ) -> void:
     var center: = Vector2.ZERO
     var total_scale: = 1.0
@@ -238,17 +197,18 @@ static func apply_deform_to_obstacle(
     var y_off: = 0.0
     var expansion: = 1.0
 
+    var deform_mult: = 1.0 + precomputed_pulse
 
     if absf(e_wobble) > 0.001:
         var phase: float = - wrapped_ring * 0.104719755 + t_wobble
-        center.x += sin(phase) * e_wobble
-        center.y += cos(phase * 1.25) * e_wobble
+        center.x += sin(phase) * e_wobble * deform_mult
+        center.y += cos(phase * 1.25) * e_wobble * deform_mult
 
 
     if absf(e_helix) > 0.001:
         var phase: float = wrapped_ring * helix_freq + t_helix
-        center.x += sin(phase) * e_helix
-        center.y += cos(phase) * e_helix
+        center.x += sin(phase) * e_helix * deform_mult
+        center.y += cos(phase) * e_helix * deform_mult
 
 
     if absf(e_mobius) > 0.001:
@@ -257,7 +217,7 @@ static func apply_deform_to_obstacle(
 
     if absf(e_twist) > 0.001:
         var wave_angle: float = - wrapped_ring * 0.020943951 + t_twist
-        var max_off: float = e_twist * 4.0
+        var max_off: float = e_twist * 4.0 * deform_mult
         if twist_dist_baked:
             center.x += sin(wave_angle) * max_off
             center.y += cos(wave_angle * 1.25) * max_off
