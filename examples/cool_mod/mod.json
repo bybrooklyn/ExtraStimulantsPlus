@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "cool_mod",
+  "name": "Cool Mod Example",
+  "version": "0.1.0",
+  "author": "bybrooklyn",
+  "description": "Minimal example mod for the ESP shim/core loader architecture.",
+  "dependencies": ["extrastimulants_plus"],
+  "priority": 100,
+  "entrypoints": ["main.gd"]
+}

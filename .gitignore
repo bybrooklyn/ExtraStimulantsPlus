@@ -1,0 +1,14 @@
+# Godot-specific ignores
+.godot/
+*.uid
+
+# Rust-specific ignores
+**/target/
+Cargo.lock
+
+# Build artifacts
+*.zip
+*.pck
+*.bak
+modlog/
+.esp-config.json

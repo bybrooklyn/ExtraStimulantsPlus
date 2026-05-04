@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "extrastimulants_plus",
+  "name": "ExtraStimulantsPlus",
+  "version": "0.0.2",
+  "author": "bybrooklyn",
+  "description": "Core ExtraStimulantsPlus runtime and modding framework.",
+  "loader_version": ">=0.2.0",
+  "game": {
+    "id": "sensory_overload",
+    "versions": ["*"]
+  },
+  "priority": 0,
+  "dependencies": [],
+  "entrypoints": ["scripts/core/esp_core.gd"]
+}

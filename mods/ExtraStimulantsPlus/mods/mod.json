@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "esp_features",
+  "name": "ExtraStimulantsPlus Features",
+  "version": "0.0.2",
+  "author": "bybrooklyn",
+  "description": "Turbo rendering optimizations and enhanced level editor.",
+  "required_framework_version": "0.0.2",
+  "dependencies": [],
+  "entrypoints": ["scripts/core/main.gd"]
+}
