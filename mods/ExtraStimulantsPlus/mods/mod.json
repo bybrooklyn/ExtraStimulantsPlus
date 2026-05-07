@@ -15,5 +15,59 @@
   "permissions": ["asset_access", "filesystem", "patching", "save_access"],
   "dependencies": {},
   "priority": 50,
+  "settings": {
+    "rendering": {
+      "label": "Rendering",
+      "settings": {
+        "rt": {
+          "label": "Path Tracing (Beta)",
+          "settings": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "label": "Path Tracing (Beta)",
+              "description": "Screen-space path tracer compositor effect. Forward+ only; off by default. Visible cost varies with samples and half-res."
+            },
+            "samples": {
+              "type": "int",
+              "default": 1,
+              "min": 1,
+              "max": 8,
+              "label": "Samples per pixel",
+              "description": "Hemisphere rays per pixel per frame. Higher = cleaner but slower; 8 is heavy."
+            },
+            "max_steps": {
+              "type": "int",
+              "default": 24,
+              "min": 4,
+              "max": 64,
+              "label": "Max ray steps",
+              "description": "Screen-space raymarch step count per ray."
+            },
+            "thickness": {
+              "type": "float",
+              "default": 0.25,
+              "label": "Hit thickness",
+              "description": "Depth epsilon (world units) for accepting a screen-space hit."
+            },
+            "fade": {
+              "type": "float",
+              "default": 1.0,
+              "min": 0.0,
+              "max": 1.0,
+              "label": "Indirect intensity",
+              "description": "Blend weight of the indirect light onto the base color (0 = none, 1 = full)."
+            },
+            "half_res": {
+              "type": "boolean",
+              "default": true,
+              "label": "Half resolution",
+              "description": "Dispatch at half-resolution. Recommended on; turn off only with strong GPU."
+            }
+          }
+        }
+      }
+    }
+  },
   "entrypoints": ["scripts/core/main.gd"]
 }

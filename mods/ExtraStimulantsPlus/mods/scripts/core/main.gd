@@ -5,6 +5,7 @@ extends Node
 const VISUALIZER_SCRIPT := "res://mods/esp_features/scripts/core/audio_visualizer.gd"
 const GHOST_RECORDER_SCRIPT := "res://mods/esp_features/scripts/core/ghost_recorder.gd"
 const MUTATOR_MANAGER_SCRIPT := "res://mods/esp_features/scripts/core/mutator_manager.gd"
+const RT_EFFECTS_SCRIPT := "res://mods/esp_features/scripts/core/rt_effects.gd"
 
 var api: Node
 
@@ -31,6 +32,7 @@ func _install_feature_nodes() -> void:
     _ensure_node(root, "AudioVisualizer", VISUALIZER_SCRIPT)
     _ensure_node(root, "GhostRecorder", GHOST_RECORDER_SCRIPT)
     _ensure_node(root, "MutatorManager", MUTATOR_MANAGER_SCRIPT)
+    _ensure_node(root, "RTEffects", RT_EFFECTS_SCRIPT)
 
 func _ensure_node(parent: Node, node_name: String, script_path: String) -> Node:
     if parent.has_node(node_name):
