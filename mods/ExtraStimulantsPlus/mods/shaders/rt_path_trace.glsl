@@ -25,6 +25,10 @@ layout(set = 0, binding = 3, std140) uniform Params {
     int frame_index;
 } params;
 
+// Snapshot of the pre-pass color buffer, copied into a separate texture by the
+// host. Reads from this don't race against writes to color_image.
+layout(set = 0, binding = 4) uniform sampler2D color_history_tex;
+
 // --- Halton low-discrepancy sequence ----------------------------------------
 float halton(int i, int b) {
     float f = 1.0;
@@ -97,7 +101,7 @@ bool march_ray(vec3 origin, vec3 dir, out vec3 hit_color) {
         vec3 to_pos = pos - origin;
         vec3 to_scene = scene_world - origin;
         if (dot(to_pos, dir) > dot(to_scene, dir) - 0.001 && diff < params.thickness) {
-            hit_color = imageLoad(color_image, ivec2(uv * vec2(params.size))).rgb;
+            hit_color = textureLod(color_history_tex, uv, 0.0).rgb;
             return true;
         }
         step_len *= 1.35;

@@ -21,6 +21,8 @@ var _shader: RID
 var _pipeline: RID
 var _ubo: RID
 var _sampler: RID
+var _color_history: RID
+var _color_history_size: Vector2i = Vector2i.ZERO
 var _compiled: bool = false
 var _compile_failed: bool = false
 
@@ -59,12 +61,21 @@ func _render_callback(p_effect_callback_type: int, p_render_data: RenderData) ->
         return
 
     var view_count: int = scene_buffers.get_view_count()
+    _ensure_color_history(size)
+    if not _color_history.is_valid():
+        return
+
     for view in range(view_count):
         var color_tex: RID = scene_buffers.get_color_layer(view)
         var depth_tex: RID = scene_buffers.get_depth_layer(view)
         var normal_tex: RID = scene_buffers.get_texture("forward_clustered", "normal_roughness")
         if not color_tex.is_valid() or not depth_tex.is_valid() or not normal_tex.is_valid():
             continue
+
+        # Snapshot the pre-pass color into a separate sampleable texture so the
+        # compute shader's reads don't race against its own writes to color_tex.
+        _rd.texture_copy(color_tex, _color_history, Vector3.ZERO, Vector3.ZERO,
+                         Vector3(size.x, size.y, 1), 0, 0, 0, 0)
 
         _dispatch(color_tex, depth_tex, normal_tex, size, scene_data, view)
 
@@ -118,7 +129,14 @@ func _dispatch(color_tex: RID, depth_tex: RID, normal_tex: RID, size: Vector2i, 
     ubo_uniform.binding = 3
     ubo_uniform.add_id(_ubo)
 
-    var uniform_set: RID = UniformSetCacheRD.get_cache(_shader, 0, [color_uniform, depth_uniform, normal_uniform, ubo_uniform])
+    var history_uniform := RDUniform.new()
+    history_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+    history_uniform.binding = 4
+    history_uniform.add_id(_sampler)
+    history_uniform.add_id(_color_history)
+
+    var uniform_set: RID = UniformSetCacheRD.get_cache(_shader, 0,
+        [color_uniform, depth_uniform, normal_uniform, ubo_uniform, history_uniform])
 
     var compute_list := _rd.compute_list_begin()
     _rd.compute_list_bind_compute_pipeline(compute_list, _pipeline)
@@ -176,6 +194,32 @@ func _compile() -> bool:
     _compiled = true
     return true
 
+func _ensure_color_history(size: Vector2i) -> void:
+    if _color_history.is_valid() and _color_history_size == size:
+        return
+    if _color_history.is_valid():
+        _rd.free_rid(_color_history)
+        _color_history = RID()
+
+    var fmt := RDTextureFormat.new()
+    fmt.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+    fmt.width = size.x
+    fmt.height = size.y
+    fmt.depth = 1
+    fmt.array_layers = 1
+    fmt.mipmaps = 1
+    fmt.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+    fmt.usage_bits = (
+        RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+        | RenderingDevice.TEXTURE_USAGE_COPY_TO_BIT
+        | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT
+    )
+
+    var view := RDTextureView.new()
+    _color_history = _rd.texture_create(fmt, view, [])
+    if _color_history.is_valid():
+        _color_history_size = size
+
 func _write_proj(buf: PackedByteArray, offset: int, p: Projection) -> void:
     var cols := [p.x, p.y, p.z, p.w]
     var idx := 0
@@ -188,6 +232,8 @@ func _write_proj(buf: PackedByteArray, offset: int, p: Projection) -> void:
 func _notification(what: int) -> void:
     if what == NOTIFICATION_PREDELETE:
         if _rd:
+            if _color_history.is_valid():
+                _rd.free_rid(_color_history)
             if _ubo.is_valid():
                 _rd.free_rid(_ubo)
             if _sampler.is_valid():

@@ -14,6 +14,7 @@ var _attached_camera: Camera3D
 var _attached_compositor: Compositor
 var _renderer_supported: bool = false
 var _logged_unsupported: bool = false
+var _settings_dirty: bool = true
 
 func _ready() -> void:
     _api = get_node_or_null("/root/ESP")
@@ -35,15 +36,27 @@ func _ready() -> void:
     if _api and _api.events:
         _api.events.on("level_started", Callable(self, "_on_level_started"), {"owner_id": MOD_ID})
 
+    var registry: Node = null
+    if _api and _api.settings and _api.settings.has_method("get_registry"):
+        registry = _api.settings.get_registry()
+    if registry and registry.has_signal("setting_changed"):
+        registry.setting_changed.connect(_on_setting_changed)
+
 func _process(_delta: float) -> void:
     if not _renderer_supported or _effect == null:
         return
 
-    _push_settings_to_effect()
+    if _settings_dirty:
+        _push_settings_to_effect()
+        _settings_dirty = false
     _ensure_effect_attached()
 
 func _on_level_started(_a = null, _b = null) -> void:
     _ensure_effect_attached()
+
+func _on_setting_changed(mod_id: String, _key: String, _value) -> void:
+    if mod_id == MOD_ID:
+        _settings_dirty = true
 
 func _ensure_effect_attached() -> void:
     var enabled := _get_bool("rendering.rt.enabled", false)
