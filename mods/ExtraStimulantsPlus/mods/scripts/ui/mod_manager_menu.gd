@@ -101,3 +101,21 @@ func _get_esp_mod_loader() -> Node:
     if loader:
         return loader
     return get_node_or_null("/root/ModLoader")
+
+func _get_mod_statuses() -> Dictionary:
+    var esp = get_node_or_null("/root/ESP")
+    if esp and esp.mods and esp.mods.has_method("get_all_statuses"):
+        return esp.mods.get_all_statuses()
+    var loader = _get_esp_mod_loader()
+    if loader and loader.has_method("get_all_mod_statuses"):
+        return loader.get_all_mod_statuses()
+    return {}
+
+func _has_failed_mods() -> bool:
+    var statuses = _get_mod_statuses()
+    for mod_id in statuses.keys():
+        var status: Dictionary = statuses.get(mod_id, {})
+        var st := String(status.get("status", ""))
+        if st == "failed" or st == "invalid" or st == "errored":
+            return true
+    return false

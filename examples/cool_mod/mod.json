@@ -1,11 +1,41 @@
 {
-  "schema": 1,
+  "schema_version": 1,
   "id": "cool_mod",
   "name": "Cool Mod Example",
   "version": "0.1.0",
-  "author": "bybrooklyn",
-  "description": "Minimal example mod for the ESP shim/core loader architecture.",
-  "dependencies": ["extrastimulants_plus"],
+  "author": {
+    "name": "bybrooklyn",
+    "url": "https://github.com/bybrooklyn"
+  },
+  "description": "Minimal example mod for the ESP schema v1 loader, settings API, and hook API.",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["example", "utility"],
+  "permissions": [],
+  "dependencies": {},
   "priority": 100,
+  "settings": {
+    "general": {
+      "label": "General",
+      "settings": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "label": "Enabled",
+          "description": "Enable the example mod."
+        }
+      }
+    }
+  },
+  "hooks": {
+    "events": [
+      {
+        "event": "level_started",
+        "method": "_on_esp_event_level_started",
+        "priority": 100
+      }
+    ]
+  },
   "entrypoints": ["main.gd"]
 }

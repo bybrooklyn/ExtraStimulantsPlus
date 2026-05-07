@@ -1,11 +1,19 @@
 {
-  "schema": 1,
+  "schema_version": 1,
   "id": "esp_features",
   "name": "ExtraStimulantsPlus Features",
   "version": "0.0.2",
-  "author": "bybrooklyn",
-  "description": "Turbo rendering optimizations and enhanced level editor.",
-  "required_framework_version": "0.0.2",
-  "dependencies": [],
+  "author": {
+    "name": "bybrooklyn",
+    "url": "https://github.com/bybrooklyn"
+  },
+  "description": "Built-in ExtraStimulantsPlus gameplay, editor, and utility features.",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["gameplay", "utility", "editor"],
+  "permissions": ["asset_access", "filesystem", "patching", "save_access"],
+  "dependencies": {},
+  "priority": 50,
   "entrypoints": ["scripts/core/main.gd"]
 }

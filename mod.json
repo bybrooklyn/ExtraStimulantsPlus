@@ -1,16 +1,19 @@
 {
-  "schema": 1,
+  "schema_version": 1,
   "id": "extrastimulants_plus",
   "name": "ExtraStimulantsPlus",
   "version": "0.0.2",
-  "author": "bybrooklyn",
-  "description": "Core ExtraStimulantsPlus runtime and modding framework.",
-  "loader_version": ">=0.2.0",
-  "game": {
-    "id": "sensory_overload",
-    "versions": ["*"]
+  "author": {
+    "name": "bybrooklyn",
+    "url": "https://github.com/bybrooklyn"
   },
+  "description": "Core ExtraStimulantsPlus runtime and modding framework.",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["framework", "utility", "loader"],
+  "permissions": ["asset_access", "filesystem", "patching", "save_access"],
   "priority": 0,
-  "dependencies": [],
+  "dependencies": {},
   "entrypoints": ["scripts/core/esp_core.gd"]
 }

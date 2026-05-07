@@ -5,8 +5,16 @@ extends Node
 
 var _active_badge: Control
 
+const GAME_UI_NAMES := {
+    "main_menu": "MainMenu",
+    "settings_menu": "SettingsMenu",
+    "main_menu_container": "MenuContainer",
+    "settings_button": "SettingsButton"
+}
+
 func _enter_tree():
-    get_tree().node_added.connect(_on_node_added)
+    if not get_tree().node_added.is_connected(_on_node_added):
+        get_tree().node_added.connect(_on_node_added)
 
 func _process(_delta):
     if _active_badge and _active_badge.is_inside_tree() and _active_badge.visible:
@@ -19,16 +27,31 @@ func _process(_delta):
 
 const SETTINGS_UI_SCRIPT := "res://scripts/core/esp_settings_ui.gd"
 var _settings_ui: Node
+var _hooked_settings_menus: Array[int] = []
 
 func _on_node_added(node: Node):
-    if node.name == "MainMenu" and node is Control:
+    if node.name == GAME_UI_NAMES.main_menu and node is Control:
         _active_badge = null
         _inject_framework_badge(node)
         _patch_main_menu_buttons(node)
-    
-    elif node.name == "SettingsMenu" or (node.get_parent() and node.get_parent().name == "SettingsMenu"):
-        var menu = node if node.name == "SettingsMenu" else node.get_parent()
+        return
+
+    var menu := _resolve_settings_menu(node)
+    if menu:
         _hook_settings_menu(menu)
+
+func _resolve_settings_menu(node: Node) -> Control:
+    if node == null:
+        return null
+
+    if node.name == GAME_UI_NAMES.settings_menu and node is Control:
+        return node
+
+    var parent := node.get_parent()
+    if parent and parent.name == GAME_UI_NAMES.settings_menu and parent is Control:
+        return parent
+
+    return null
 
 func _hook_settings_menu(menu: Control) -> void:
     if not _settings_ui:
@@ -36,8 +59,16 @@ func _hook_settings_menu(menu: Control) -> void:
         if script:
             _settings_ui = script.new()
             add_child(_settings_ui)
+
+    var menu_id := menu.get_instance_id()
+    if _hooked_settings_menus.has(menu_id):
+        if _settings_ui and _settings_ui.has_method("refresh_settings_ui"):
+            _settings_ui.refresh_settings_ui()
+        return
+
+    _hooked_settings_menus.append(menu_id)
     
-    if _settings_ui.has_method("hook_settings_menu"):
+    if _settings_ui and _settings_ui.has_method("hook_settings_menu"):
         _settings_ui.hook_settings_menu(menu)
 
 func _inject_framework_badge(menu: Control):
@@ -69,7 +100,7 @@ func _inject_framework_badge(menu: Control):
 
 func _patch_main_menu_buttons(menu: Control):
     # This remains to allow the framework to inject the "CUSTOM MAPS" or other core entries
-    var container = menu.find_child("MenuContainer", true, false)
+    var container = menu.find_child(GAME_UI_NAMES.main_menu_container, true, false)
     if container:
         # Check settings if we should show the editor button (framework still manages this entry)
         var settings = get_node_or_null("/root/ExtraStimulantsPlusSettings")
@@ -89,7 +120,7 @@ func _inject_custom_maps_button(container: VBoxContainer):
         get_tree().change_scene_to_file("res://scenes/level_editor/level_browser.tscn")
     )
     container.add_child(btn)
-    var settings_btn = container.get_node_or_null("SettingsButton")
+    var settings_btn = container.get_node_or_null(GAME_UI_NAMES.settings_button)
     if settings_btn: container.move_child(btn, settings_btn.get_index())
 
 func _patch_settings_menu(node: Node):

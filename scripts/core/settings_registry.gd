@@ -4,6 +4,7 @@ extends Node
 # Manages mod-specific settings and provides persistence.
 
 signal setting_changed(mod_id: String, key: String, value: Variant)
+signal setting_registered(mod_id: String, key: String, data: Dictionary)
 
 const CONFIG_PATH := "user://esp_mod_settings.cfg"
 
@@ -25,6 +26,7 @@ func register(mod_id: String, key: String, type: int, default: Variant, options:
         "options": options,
         "value": saved_value
     }
+    setting_registered.emit(mod_id, key, _registry[mod_id][key].duplicate(true))
 
 func get_value(mod_id: String, key: String) -> Variant:
     if _registry.has(mod_id) and _registry[mod_id].has(key):
@@ -39,4 +41,4 @@ func set_value(mod_id: String, key: String, value: Variant) -> void:
         setting_changed.emit(mod_id, key, value)
 
 func get_all_settings() -> Dictionary:
-    return _registry
+    return _registry.duplicate(true)

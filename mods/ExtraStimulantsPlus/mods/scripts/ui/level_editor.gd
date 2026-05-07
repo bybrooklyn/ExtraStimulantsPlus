@@ -299,54 +299,21 @@ func _on_save_pressed():
 func _on_play_test_pressed():
     if UiSfxManager: UiSfxManager.play_click()
     
-    # Save to temp location
-    var temp_path = "user://custom_levels/_editor_test.json"
     _sequence.sort_custom(func(a, b): return a.ring_position < b.ring_position)
     var meta = {
+        "title": "Editor Test",
+        "stage_name": "Testing...",
         "theme": _current_theme_name,
         "song": _current_song_path,
-        "is_test": true
+        "is_test": true,
+        "practice_mode": true
     }
-    ObstacleSequenceSerializer.save_to_path(_sequence, temp_path, meta)
-    
-    # We need to construct a dynamic LevelData/StageDef
-    var level_def = CampaignLevelDef.new()
-    level_def.level_name = "Editor Test"
-    
-    var stage = StageDef.new()
-    stage.stage_name = "Testing..."
-    
-    # Load Theme
-    var theme_res = load("res://resources/themes/" + _current_theme_name + ".tres")
-    if theme_res:
-        stage.theme = theme_res
-        
-    # Load Song
-    var song_res: AudioStream = null
-    if _current_song_path.begins_with("user://"):
-        var loader = load("res://scripts/core/external_audio_loader.gd")
-        if loader:
-            song_res = loader.load_external_audio(_current_song_path)
-    else:
-        song_res = load(_current_song_path)
-        
-    if song_res:
-        stage.song = song_res
-    
-    var substage = SubStageDef.new()
-    substage.obstacle_sequence_path = temp_path
-    
-    stage.substages.append(substage)
-    level_def.stages.append(stage)
-    
-    # Inject this custom level into the CampaignManager
-    if CampaignManager:
-        CampaignManager._cached_all_levels = [level_def]
-        CampaignManager.current_level = level_def
-        CampaignManager.current_stage_index = 0
-    
-    GameContext.set_mode(GameContext.GameMode.CAMPAIGN)
-    get_tree().change_scene_to_file("res://scenes/game.tscn")
+    var api := get_node_or_null("/root/ESP")
+    if api and api.has_method("play_custom_sequence"):
+        api.play_custom_sequence(_sequence, meta, "user://custom_levels/_editor_test.somap")
+        return
+
+    push_warning("Level Editor: ESP campaign adapter unavailable; cannot start playtest")
 
 func _on_add_pressed():
     if UiSfxManager: UiSfxManager.play_click()
@@ -388,7 +355,6 @@ func _rebuild_timeline():
             timeline_container.add_child(line)
 
     for i in range(_sequence.size()):
-...
         var entry = _sequence[i]
         var btn = ColorRect.new()
         btn.color = Color(0.2, 0.6, 0.8) if not _selected_indices.has(i) else Color(0.8, 0.8, 0.2)

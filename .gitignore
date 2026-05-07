@@ -12,3 +12,9 @@ Cargo.lock
 *.bak
 modlog/
 .esp-config.json
+
+# Local reference / scratch — not part of the framework
+SensoryOverload/
+*-dump.json
+plan.md
+.DS_Store

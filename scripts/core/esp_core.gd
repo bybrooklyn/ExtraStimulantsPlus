@@ -14,6 +14,8 @@ const GHOST_RECORDER_SCRIPT := "res://scripts/core/ghost_recorder.gd"
 const MUTATOR_MANAGER_SCRIPT := "res://scripts/core/mutator_manager.gd"
 const UI_INJECTOR_SCRIPT := "res://scripts/core/ui_injector.gd"
 const MOD_LOADER_SCRIPT := "res://scripts/core/mod_loader.gd"
+const EVENT_ADAPTER_SCRIPT := "res://scripts/core/esp_event_adapter.gd"
+const CAMPAIGN_ADAPTER_SCRIPT := "res://scripts/core/esp_campaign_adapter.gd"
 
 var boot_info: Dictionary = {}
 var api: Node
@@ -25,6 +27,8 @@ var ghost_recorder: Node
 var mutator_manager: Node
 var ui_injector: Node
 var mod_loader: Node
+var event_adapter: Node
+var campaign_adapter: Node
 
 
 func set_boot_info(info: Dictionary) -> void:
@@ -68,10 +72,25 @@ func _install_core_nodes() -> void:
     
     settings_registry = _ensure_root_node("ESPSettingsRegistry", SETTINGS_REGISTRY_SCRIPT)
     level_registry = _ensure_root_node("ESPLevelRegistry", LEVEL_REGISTRY_SCRIPT)
+    event_adapter = _ensure_root_node("ESPEventAdapter", EVENT_ADAPTER_SCRIPT)
+    campaign_adapter = _ensure_root_node("ESPCampaignAdapter", CAMPAIGN_ADAPTER_SCRIPT)
     
     mod_loader = _ensure_root_node("ESPModLoader", MOD_LOADER_SCRIPT)
     ui_injector = _ensure_root_node("ESPUIInjector", UI_INJECTOR_SCRIPT)
     api = _ensure_root_node("ESP", API_SCRIPT)
+
+    if event_adapter and event_adapter.has_method("configure"):
+        event_adapter.configure({
+            "hooks": hooks,
+            "logger": logger
+        })
+
+    if campaign_adapter and campaign_adapter.has_method("configure"):
+        campaign_adapter.configure({
+            "hooks": hooks,
+            "logger": logger,
+            "level_registry": level_registry
+        })
 
     if api and api.has_method("configure"):
         api.configure({
@@ -79,9 +98,12 @@ func _install_core_nodes() -> void:
             "mods": mod_loader,
             "settings": settings,
             "hooks": hooks,
+            "events": hooks,
             "logger": logger,
             "settings_registry": settings_registry,
-            "level_registry": level_registry
+            "level_registry": level_registry,
+            "event_adapter": event_adapter,
+            "campaign": campaign_adapter
         })
 
     if mod_loader and mod_loader.has_method("set_core_context"):
@@ -90,6 +112,9 @@ func _install_core_nodes() -> void:
             "logger": logger,
             "hooks": hooks,
             "settings": settings,
+            "event_adapter": event_adapter,
+            "campaign": campaign_adapter,
+            "level_registry": level_registry,
             "core_pack_path": boot_info.get("core_pack_path", "")
         })
 

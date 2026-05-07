@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -14,9 +14,8 @@ use walkdir::WalkDir;
 
 const VERSION: &str = "0.0.2";
 const CONFIG_FILE: &str = ".esp-config.json";
-const LOG_DIR: &str = "modlog";
 const LOAD_PLAN_FILE: &str = "modloader/load_plan.json";
-const FRAMEWORK_URL: &str = "https://github.com/bybrooklyn/extrastimulants_plus/releases/latest/download/ExtraStimulantsPlus.zip";
+const FRAMEWORK_URL: &str = "https://github.com/bybrooklyn/extrastimulantsplus/releases/latest/download/ExtraStimulantsPlus.zip";
 
 // Embedded bootstrap files
 const SHIM_GD: &[u8] = include_bytes!("../../../esp_shim/ESPShim.gd");
@@ -366,7 +365,7 @@ fn md5_bytes(input: &[u8]) -> [u8; 16] {
     out
 }
 
-fn merge_override_cfg(existing: Option<&[u8]>, shim: &str) -> String {
+fn merge_override_cfg(existing: Option<&[u8]>, _shim: &str) -> String {
     let line = r#"ESPShim="*res://esp_shim/ESPShim.gd""#;
     let mut text = existing.map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
     if text.contains("ESPShim") { return text; }
