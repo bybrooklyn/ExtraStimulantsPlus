@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "daily_challenge",
+  "name": "Daily Challenge",
+  "version": "0.1.0",
+  "author": {
+    "name": "bybrooklyn",
+    "url": "https://github.com/bybrooklyn"
+  },
+  "description": "A new challenge every day. Seed is derived from the current UTC date, so every player gets the same level on the same day. Keep your streak alive.",
+  "homepage": "https://github.com/bybrooklyn/extrastimulantsplus",
+  "repository": "https://github.com/bybrooklyn/extrastimulantsplus",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["gameplay", "ui"],
+  "permissions": [],
+  "dependencies": {},
+  "priority": 100,
+  "entrypoints": ["main.gd"]
+}

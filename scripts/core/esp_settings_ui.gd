@@ -6,11 +6,18 @@ extends Node
 const MODS_TAB_BUTTON_NAME := "ModsTabButton"
 const MODS_CONTAINER_NAME := "ESPModsSettingsContainer"
 const MODS_TAB_LABEL := "MODS"
-const NATIVE_STYLE_TAB_INDEX := 3
+# Style anchor: when calling the game's `_make_section_header(text, index)` /
+# `_make_pill_toggle(index)` helpers, we want the same visual style the LAST
+# native tab uses. Resolved at runtime by _native_style_anchor() so we don't
+# break when the game adds, removes, or reorders tabs.
+const NATIVE_STYLE_FALLBACK := 3
 const MODS_TAB_ACCENT := Color(1.0, 0.831, 0.122, 1.0)
 const MODS_TAB_INACTIVE := Color(0.145, 0.086, 0.0, 0.6)
 const ROW_HOVER_LEFT_PADDING := 42.0
 const ROW_HOVER_BAR_WIDTH := 3.0
+# After ~2 seconds (120 frames @ 60Hz) of waiting for the SettingsMenu's
+# native internals to be ready, give up rather than poll forever.
+const HOOK_RETRY_BUDGET := 120
 
 var settings_menu: Control
 var esp_tab_container: VBoxContainer
@@ -19,6 +26,7 @@ var _mods_button: Button
 var _registry: Node
 var _pending_refresh := false
 var _mods_active := false
+var _hook_retries_remaining := HOOK_RETRY_BUDGET
 
 
 func hook_settings_menu(menu: Control) -> void:
@@ -26,6 +34,7 @@ func hook_settings_menu(menu: Control) -> void:
         return
 
     settings_menu = menu
+    _hook_retries_remaining = HOOK_RETRY_BUDGET
     _connect_registry()
     call_deferred("_hook_settings_menu_deferred", menu)
 
@@ -42,6 +51,10 @@ func _hook_settings_menu_deferred(menu: Control) -> void:
         return
 
     if not _settings_menu_has_native_internals(menu):
+        _hook_retries_remaining -= 1
+        if _hook_retries_remaining <= 0:
+            _log_warn("SettingsMenu native internals never appeared; giving up after %d frames" % HOOK_RETRY_BUDGET)
+            return
         call_deferred("_hook_settings_menu_deferred", menu)
         return
 
@@ -208,7 +221,7 @@ func _add_empty_state(message: String) -> void:
 
 func _add_section_header(text: String) -> void:
     if settings_menu and is_instance_valid(settings_menu) and settings_menu.has_method("_make_section_header"):
-        var header = settings_menu.call("_make_section_header", text, NATIVE_STYLE_TAB_INDEX)
+        var header = settings_menu.call("_make_section_header", text, _native_style_anchor())
         if header is Control:
             esp_tab_container.add_child(header)
             return
@@ -266,6 +279,7 @@ func _add_setting_row(mod_id: String, key: String, data: Dictionary) -> void:
 func _create_setting_control(mod_id: String, key: String, data: Dictionary) -> Control:
     var setting_type := int(data.get("type", 0))
     var value: Variant = data.get("value", data.get("default", null))
+    var options: Dictionary = data.get("options", {})
 
     match setting_type:
         TYPE_BOOL:
@@ -275,9 +289,32 @@ func _create_setting_control(mod_id: String, key: String, data: Dictionary) -> C
         TYPE_FLOAT:
             return _create_number_control(mod_id, key, data, false)
         TYPE_STRING:
+            # If the schema declares a fixed `choices` array, render a real
+            # dropdown instead of a free-form LineEdit. Lets mods expose
+            # preset selectors (e.g. path-tracer presets) cleanly.
+            var choices: Variant = options.get("choices", null)
+            if choices is Array and not (choices as Array).is_empty():
+                return _create_choice_control(mod_id, key, String(value), choices as Array)
             return _create_string_control(mod_id, key, String(value))
         _:
             return null
+
+
+func _create_choice_control(mod_id: String, key: String, initial_value: String, choices: Array) -> OptionButton:
+    var dropdown := OptionButton.new()
+    dropdown.custom_minimum_size = Vector2(200, 36)
+    dropdown.size_flags_horizontal = Control.SIZE_SHRINK_END
+    var initial_index := 0
+    for i in range(choices.size()):
+        var label := String(choices[i])
+        dropdown.add_item(label, i)
+        if label == initial_value:
+            initial_index = i
+    dropdown.select(initial_index)
+    dropdown.item_selected.connect(func(index: int):
+        _set_registry_value(mod_id, key, String(choices[index]))
+    )
+    return dropdown
 
 
 func _create_bool_control(mod_id: String, key: String, initial_state: bool) -> Button:
@@ -327,7 +364,7 @@ func _create_string_control(mod_id: String, key: String, initial_value: String) 
 
 func _create_native_toggle() -> Button:
     if settings_menu and is_instance_valid(settings_menu) and settings_menu.has_method("_make_pill_toggle"):
-        var toggle = settings_menu.call("_make_pill_toggle", NATIVE_STYLE_TAB_INDEX)
+        var toggle = settings_menu.call("_make_pill_toggle", _native_style_anchor())
         if toggle is Button:
             return toggle
 
@@ -430,7 +467,7 @@ func _redraw_scroll_indicator() -> void:
         return
 
     var previous_section := int(settings_menu.get("_active_section"))
-    settings_menu.set("_active_section", NATIVE_STYLE_TAB_INDEX)
+    settings_menu.set("_active_section", _native_style_anchor())
 
     var indicator = settings_menu.get("_scroll_indicator")
     if indicator is Control:
@@ -484,6 +521,23 @@ func _get_registry() -> Node:
 
 func _settings_menu_has_native_internals(menu: Control) -> bool:
     return _get_tab_bar(menu) != null and _get_content_vbox(menu) != null and _get_section_containers(menu).size() >= 4 and _get_nav_buttons(menu).size() >= 4
+
+
+# Returns the index of the LAST native tab (i.e. excluding our injected MODS
+# tab). Used as the style-anchor argument when calling the game's native
+# `_make_section_header(text, index)` / `_make_pill_toggle(index)` so our UI
+# matches the most-recently-styled native tab. Falls back to the historical
+# value (3) if the menu structure can't be queried — the original hardcoded
+# behavior.
+func _native_style_anchor() -> int:
+    var buttons := _get_nav_buttons()
+    if buttons.is_empty():
+        return NATIVE_STYLE_FALLBACK
+    var last_native := buttons.size() - 1
+    # If our own button is in the list, exclude it.
+    if _mods_button and last_native >= 0 and buttons[last_native] == _mods_button:
+        last_native -= 1
+    return max(0, last_native)
 
 
 func _get_tab_bar(menu: Control = null) -> HBoxContainer:

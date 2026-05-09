@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "{{id}}",
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "author": {
+    "name": "{{author}}",
+    "url": "{{author_url}}"
+  },
+  "description": "{{description}}",
+  "repository": "{{repository}}",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["gameplay"],
+  "permissions": [],
+  "dependencies": {},
+  "priority": 100,
+  "entrypoints": ["main.gd"]
+}

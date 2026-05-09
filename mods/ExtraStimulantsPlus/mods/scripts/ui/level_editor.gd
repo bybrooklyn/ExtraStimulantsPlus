@@ -77,14 +77,17 @@ func _process(delta):
         _auto_backup()
 
 func _auto_backup():
+    var backup_dir = _get_editor_backups_dir()
     var dir = DirAccess.open("user://")
-    if not dir: return
-    if not dir.dir_exists("custom_levels/backups"):
-        dir.make_dir_recursive("custom_levels/backups")
+    if not dir:
+        return
+    var backup_absolute := ProjectSettings.globalize_path(backup_dir)
+    if not DirAccess.dir_exists_absolute(backup_absolute):
+        DirAccess.make_dir_recursive_absolute(backup_absolute)
             
     var base_name = path_edit.text.get_file().get_basename()
     if base_name == "": base_name = "untitled"
-    var backup_path = "user://custom_levels/backups/%s_auto.somap" % base_name
+    var backup_path = backup_dir.path_join("%s_auto.somap" % base_name)
     
     var meta = {
         "theme": _current_theme_name,
@@ -256,7 +259,9 @@ func _on_help_pressed():
     - Use 'Create Custom' to draw your own shapes.
     
     Saving:
-    - Export files to 'user://custom_levels/name.somap' to share them.
+    - Export files to the canonical levels directory shown in the path box.
+    - Standalone levels belong in 'levels/'.
+    - Multi-level campaigns belong in 'campaigns/' as .somapbundle archives.
     - Legacy '.json' files are still supported for import.
     """
     add_child(popup)
@@ -310,7 +315,7 @@ func _on_play_test_pressed():
     }
     var api := get_node_or_null("/root/ESP")
     if api and api.has_method("play_custom_sequence"):
-        api.play_custom_sequence(_sequence, meta, "user://custom_levels/_editor_test.somap")
+        api.play_custom_sequence(_sequence, meta, _get_levels_dir().path_join("_editor_test.somap"))
         return
 
     push_warning("Level Editor: ESP campaign adapter unavailable; cannot start playtest")
@@ -567,7 +572,7 @@ func _get_default_level_path() -> String:
     var esp_settings := get_node_or_null("/root/ExtraStimulantsPlusSettings")
     if esp_settings and not esp_settings.prefers_somap():
         extension = "json"
-    return "user://custom_levels/custom_map.%s" % extension
+    return _get_levels_dir().path_join("custom_map.%s" % extension)
 
 
 func _normalize_level_path(path: String, for_save: bool) -> String:
@@ -579,6 +584,20 @@ func _normalize_level_path(path: String, for_save: bool) -> String:
         return trimmed
     var esp_settings := get_node_or_null("/root/ExtraStimulantsPlusSettings")
     return trimmed + (".somap" if esp_settings == null or esp_settings.prefers_somap() else ".json")
+
+
+func _get_levels_dir() -> String:
+    var esp := get_node_or_null("/root/ESP")
+    if esp and esp.level_registry and esp.level_registry.has_method("get_primary_levels_dir"):
+        return esp.level_registry.get_primary_levels_dir()
+    return "user://levels"
+
+
+func _get_editor_backups_dir() -> String:
+    var esp := get_node_or_null("/root/ESP")
+    if esp and esp.level_registry and esp.level_registry.has_method("get_editor_backups_dir"):
+        return esp.level_registry.get_editor_backups_dir()
+    return "user://esp/editor/backups"
 
 
 func _get_available_themes() -> Array[String]:

@@ -1,4 +1,4 @@
-# ExtraStimulantsPlus v0.0.2
+# ExtraStimulantsPlus
 
 A shim-based modding framework for *Sensory Overload*.
 
@@ -135,23 +135,123 @@ Each mod has a status the loader keeps current: `discovered`, `validating`, `pre
 
 ---
 
-## 6. Advanced Roadmap
+## 6. Changelog
 
-### I. True Native UI Polish
-Upgrade the Settings UI generator to use the game's official `.tres` styleboxes and sound effects, making mod menus indistinguishable from native game tabs.
+### Unreleased — post-v0.0.2
 
-### II. .somap Deep Loader
-Implement a comprehensive audio bridge for custom `.somap` levels, dynamically unzipping and loading `.ogg`/`.wav` music and parsing JSON metadata into native engine resources.
+Procedural level generator (`ESP.campaign.generate_sequence` /
+`ESP.campaign.play_generated`), Daily Challenge mod, GitHub releases-API
+framework download (no more hardcoded URL/hash per release), Windows + Linux
+GitHub Actions build workflow, Steam-via-Proton launch on Linux, `repository`
+field in `mod.json`, 21 framework bug fixes, 12 audit fixes. macOS is no
+longer a shipped target — Sensory Overload has no native Mac build, so
+esp-tool there would have nothing to install or launch. Mac developers can
+still `cargo build` locally for `esp pack` / `esp create` mod authoring.
 
-### III. The ESP Update Hub
-Activate full GitHub API integration in the Rust CLI to support `esp update` and `esp add <url>`.
+### v0.0.2
 
-### IV. Surgical Regex Patching
-Research a runtime "Surgical Patcher" that modifies game scripts in memory via Regex so multiple mods can modify the same file without conflicts or `take_over_path()` overwrites.
+A near-rewrite of the framework. Everything in **§2 Working Now** and most of **§3 Experimental** is new since v0.0.1.
+
+#### Framework architecture
+- **Shim/core split.** A tiny PCK-injected shim (`esp_shim/ESPShim.gd`) mounts an external core pack at `_init`, then hands control to the full loader. The core is shipped separately as `mods/ExtraStimulantsPlus.zip`, so iterating on framework code does not require re-patching the game PCK.
+- **Schema v1 mod manifests** are required; the loader rejects mods without `schema_version: 1`.
+- **`/root/ESP` namespaced API** with 9 namespaces: `mods`, `settings`, `hooks`, `events`, `game`, `campaign`, `assets`, `saves`, `ui`. Legacy direct helpers retained as compatibility wrappers.
+- **Priority-ordered cancellable hook bus** (`ESPHooks`) replaces ad-hoc signal wiring.
+- **EventBus → ESP hook adapter** (`scripts/core/esp_event_adapter.gd`): the GAME_EVENT_MAP table re-emits 25+ game signals as stable framework events (`level_started`, `obstacle_passed`, `player_died`, `score_updated`, etc.).
+- **Campaign adapter** for custom level registration (`api.campaign.play_custom_level_path`).
+- **Mod status lifecycle tracking**: `discovered → validating → preloading → preloaded → initializing → initialized → readying → loaded` plus terminal `disabled / invalid / failed / errored`. Persisted to `<game_dir>/modloader/mod_statuses.json` so the orchestrator GUI can show live state.
+- **User profile state file** (`modloader/user_profile.json`) — godot-mod-loader-compatible schema (`mod_list[mod_id] = {enabled}`); leaves room for named profiles and per-mod configs without changing the on-disk shape.
+
+#### Built-in mod (`esp_features`)
+- **Screen-space path tracer** as a Forward+ `CompositorEffect`. 4-pass pipeline: trace (half-res, N cosine-weighted hemisphere rays per pixel) → temporal reproject (per-pixel EMA, disocclusion check) → 3-iter à-trous denoise (edge-stops on depth + normal) → composite (full-res depth-aware bilateral upsample, additive). Octahedral normal decode for `normal_roughness`. Tunable sky/miss color so corners no longer go pitch-black. **Quality presets**: `off / gameplay / cinematic / custom` (dropdown in the settings UI).
+- **Audio visualizer** wired into `api.settings` and `api.events`; samples the Music bus during levels and drives the `mod_music_pulse` shader global.
+- **Ghost recorder** writes to `user://esp_features/ghosts/<level>.soghost`; reads with a fallback to the legacy `user://ghosts/` path so existing recordings stay visible.
+- **Mutators** — actual implementations: **Mirror Mode** (InputMap swap of `move_left ↔ move_right`, originals restored on disable) and **Turbo Mode** (`Engine.time_scale = 1.2` while a level is active). Live `setting_changed` listener so toggles take effect immediately.
+- **Custom level browser & level editor** scenes ship with the bundled mod.
+
+#### `api.ui` namespace (new)
+- `inject_main_menu_button(label, callback, owner_id, options)` — namespaced, idempotent, supports `position: "before:Foo"` / `"after:Bar"` / `"end"`.
+- `inject_hud_overlay(scene_or_node, owner_id, options)` — CanvasLayer with z-index control, auto-removed on `level_completed` / `player_died` unless `persistent: true`.
+- `wait_for_node(name_or_path, callback, options)` — one-shot listener with a 5-second default timeout.
+- `set_badge_visible / set_badge_color / get_theme_accent`.
+- The framework's own Custom Maps button now uses `inject_main_menu_button` as the canonical example.
+
+#### `api.assets` mod-relative helpers
+- `mod_path(meta)` / `resolve(meta, relative)` / `load_text(meta, relative)` / `load_from_mod(meta, relative)` / `script_extension(meta, ext_relative, target_res_path)`. Lets mods avoid hardcoding `res://mods/<my_id>/...` paths and works whether the mod is mounted as a folder or a zip.
+
+#### Settings UI
+- Native MODS tab injected into the game's `SettingsMenu`.
+- Type-correct controls: bool → pill toggle, int/float → SpinBox (with `min/max/step`), string → LineEdit, **string + `choices` array → OptionButton dropdown** (new — used by the path tracer presets).
+- `setting_changed` signal so live tweaks propagate to listening mods.
+- Idempotent injection guards via `has_meta`.
+- Dynamic native-tab style anchor (no more hardcoded `NATIVE_STYLE_TAB_INDEX = 3`).
+- Bounded retry on the deferred SettingsMenu hook (gives up after ~2 s instead of looping forever).
+- Theme-aware badge accent — pulls from the menu theme if it defines `esp_accent` / `accent`, falls back to the framework's cyan.
+
+#### ESP Orchestrator (Rust app)
+- **Module split.** `main.rs` went from 671 lines to ~38; everything else lives in dedicated modules (`cli`, `config`, `error`, `gamelog`, `gui`, `install`, `launch`, `loadplan`, `modmgr`, `pack`, `pck`, `scaffold`, `steam`).
+- **`esp create` wizard** with 6 templates (`minimal`, `events`, `settings`, `feature`, `ui`, `campaign`). Interactive (`dialoguer` prompts) or one-shot (`--template <name> --no-prompt`). `--here` adds a template's files to the current mod. Generated source files include API signatures inline as comments — the docs are the scaffold.
+- **`esp uninstall`** subcommand and GUI button. Restores the PCK from `.esp-backup` (or strips injected entries in place) and removes `modloader/`, `mods/`, `levels/`.
+- **Mod manager UI panel** in the GUI: lists every discovered mod with status indicators, enable/disable toggle (writes `user_profile.json`), `Install Mod...` file picker (drops zip/pck into `mods/`), Refresh, auto-refresh on `mods/` mtime change, expandable per-mod details.
+- **`UPDATE FRAMEWORK` button** redownloads the core pack zip.
+- **Live game-log viewer** tails `user://logs/godot.log` with platform-correct path resolution; throttles to 2 s polling when the file's idle for >10 s.
+- **Steam VDF parser** rewritten with a real tokenizer; correctly handles multi-library installs.
+- **Linux/macOS Steam paths** broadened (`~/.steam/steam`, `~/.steam/root`, `~/Library/Application Support/Steam`).
+- **macOS launch** probes `<App>.app/Contents/MacOS/SensoryOverload`, then bare and `.x86_64` fallbacks.
+- **Config moved** from CWD `.esp-config.json` to `dirs::config_dir()/esp/config.json` with one-time migration from the legacy location.
+- **`LoadPlan`** populates `generated_at` (RFC3339), reads `framework_version` from the bundled core pack manifest, scans `levels/`, and discovers `.zip`/`.pck` mods alongside folders.
+- **`fetch_framework`** returns `Err` on non-2xx HTTP (was silently `Ok(())`).
+- **MD5** swapped from a 22-line hand-roll to the `md5` crate.
+- **Dependencies cleaned**: dropped `tokio` and `colored` (unused); added `md5`, `dialoguer`, `rfd` (file picker).
+
+#### Notable bug fixes since v0.0.1
+- macOS `modloader_dir` mismatch — the orchestrator wrote to `<App>.app/Contents/Resources/modloader/` but the shim looked in `<App>.app/Contents/MacOS/modloader/`. Toggling mods on Mac silently did nothing. Resolver now probes both and prefers the existing one.
+- Path tracer same-dispatch read/write race on the color buffer — fixed via a host-managed `color_history` snapshot bound separately.
+- Octahedral normal decode TODO (`#define OCT_DECODE 0`) removed — Forward+ uses octahedral encoding unconditionally.
+- Half-res output 2×2 quad blockiness — replaced by full-res bilateral upsample.
+- `fetch_framework` silent download failure (see above).
 
 ---
 
-## 7. License & Legal
+## 7. What's still pending
+
+Tracked roughly in priority order. Items completed in v0.0.2 are listed in the Changelog above.
+
+### Near-term polish
+- **Path tracer uniform-set cache thrash.** Per-frame ping-pong RIDs (history, atrous) cause `UniformSetCacheRD.get_cache(...)` to allocate fresh sets every frame instead of reusing them. Not wrong, but a perf cliff worth fixing.
+- **`api.ui.inject_settings_tab` is a stub** that warns and returns null. Mods needing custom tabs route through declarative `mod.json::settings` for now.
+- **Hand-rolled `GodotPck` reader** has not been stress-tested against PCK v1 or non-default flag combinations. May panic on real-world games beyond Sensory Overload's specific build.
+- **`SettingsNamespace.has_method("get_registry")` brittleness.** Several call sites rely on this returning true for the `class` keyword; if Godot ever changes how nested classes inherit from `Object`, callers fall over silently. Replace with a typed null check.
+
+### Developer tooling (deferred from the `esp create` pass)
+- **`esp validate <path>`** — lint a mod against the schema; resolve script-extension targets against the installed PCK.
+- **`esp doctor`** — diagnose a broken install (PCK has shim? `modloader/` exists? statuses sane?) with one-line fixes.
+- **`esp open mods | game | userdata`** — open the relevant directory in the OS file manager.
+- **Hot reload during development** — file watcher on `mods/` plus a "reload mods" event mods can opt into. State management is the hard part; start with "reload settings only".
+- **Tests, CI, and a linter** for the GDScript side. None of the framework code is currently covered.
+
+### godot-mod-loader feature parity
+- **Named user profiles** — switch between curated mod sets (e.g. *default* / *minimal* / *challenge*). The `user_profile.json` schema already has the `name` field; needs orchestrator UI for create/switch/delete.
+- **Per-mod runtime configuration.** GML's `current_config` field. Pairs with `api.settings` to let users pick between mod-defined named presets at runtime.
+- **Restart-required hot-toggle prompts** when toggling mods that can't safely live-swap (most of them).
+- **JSON Schema validator** borrowed from GML's `addons/JSON_Schema_Validator/` for richer manifest validation than our current ad-hoc `_normalize_metadata`.
+
+### Larger items still on the original 0.0.2 roadmap
+- **True Native UI Polish.** Brittleness fixes landed (anchors, theme accent, retry-bounded polling); the deeper goal of pulling SO's `.tres` styleboxes and SFX so framework-injected widgets are byte-for-byte indistinguishable from native ones is still outstanding.
+- **`.somap` Deep Loader.** Comprehensive audio bridge for custom levels — unzip + load `.ogg`/`.wav` music, parse JSON metadata into native engine resources. The custom level browser and editor exist; the `.somap` packaging path does not.
+- **ESP Update Hub.** `UPDATE FRAMEWORK` re-downloads the core pack today. Still missing: `esp update` (self-update), `esp add <url>` (install a third-party mod from a GitHub release URL), and a "new version available" indicator in the GUI.
+- **Surgical regex patcher.** Runtime in-memory script patcher so multiple mods can modify the same file without `take_over_path` collisions. Still research-grade.
+
+### Smaller items worth doing eventually
+- Pack-core CLI invocation should exclude the `GML/` clone alongside `tools/` and `.git/`.
+- Search box and keyboard navigation in the orchestrator's mod manager.
+- Settings search across all mods inside the in-game MODS tab.
+- A "what's running" debug overlay in-game (mod count, framework version, hotkey to toggle).
+- Crash recovery: if a mod's `esp_init` throws, surface a one-click "disable this mod" in the orchestrator on next launch.
+
+---
+
+## 8. License & Legal
 
 - Code: MIT.
 - This repo contains no original game assets.

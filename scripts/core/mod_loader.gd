@@ -8,6 +8,12 @@ const CORE_MOD_ID := "extrastimulants_plus"
 const CORE_VERSION := "0.0.2"
 const SUPPORTED_GAME_ID := "sensory_overload"
 const SUPPORTED_SCHEMA := 1
+const LEGACY_SCHEMA := 0
+const MOD_HASH_INDEX_FILE := "mod_hashes.json"
+const PACKAGE_HASH_FIELD := "package_sha256"
+const LEGACY_HASH_FIELDS := ["content_sha256", "sha256"]
+const HASH_IGNORE_FILES := [".ds_store", "thumbs.db", "desktop.ini"]
+const RISKY_PERMISSIONS: Array[String] = ["filesystem", "hot_reload", "internet", "patching", "raw_api", "save_access"]
 const CORE_PACK_NAMES: Array[String] = [
     "000_extrastimulantsplus_core.pck",
     "000_extrastimulantsplus_core.zip",
@@ -44,6 +50,8 @@ var mod_statuses: Dictionary = {}
 
 var _loaded_ids: Array[String] = []
 var _blacklist: Array[String] = []
+var _user_disabled: Dictionary = {}  # mod_id -> true; populated from user_profile.json
+var _modloader_dir: String = ""
 var _core_context: Dictionary = {}
 var _api: Node
 var _logger: Node
@@ -51,6 +59,8 @@ var _hooks: Node
 var _event_adapter: Node
 var _settings_registry: Node
 var _has_loaded_external_mods := false
+var _core_pack_path: String = ""
+var _mod_hash_index: Dictionary = {}
 
 
 func _enter_tree() -> void:
@@ -67,6 +77,10 @@ func set_core_context(context: Dictionary) -> void:
     _hooks = _core_context.get("hooks")
     _event_adapter = _core_context.get("event_adapter")
     _settings_registry = _core_context.get("settings_registry")
+    _modloader_dir = String(_core_context.get("modloader_dir", ""))
+    _core_pack_path = String(_core_context.get("core_pack_path", ""))
+    _load_user_profile()
+    _load_mod_hash_index()
 
 
 func load_external_mods(mods_dirs: Array = [], core_pack_path: String = "") -> void:
@@ -98,6 +112,12 @@ func load_external_mods(mods_dirs: Array = [], core_pack_path: String = "") -> v
         if is_blacklisted(mod_id):
             _set_mod_status(mod_id, "disabled", meta, "blacklisted")
             _log_info("skipping blacklisted mod: %s" % mod_id)
+            candidate["skip"] = true
+            continue
+
+        if is_user_disabled(mod_id):
+            _set_mod_status(mod_id, "disabled", meta, "user_profile")
+            _log_info("skipping mod disabled in user profile: %s" % mod_id)
             candidate["skip"] = true
             continue
 
@@ -199,6 +219,22 @@ func load_external_mods(mods_dirs: Array = [], core_pack_path: String = "") -> v
         _log_info("Activated %s v%s" % [meta.get("name"), meta.get("version")])
 
     _log_info("Loaded %d mod(s); %d failed" % [loaded_mods.size(), failed_mods.size()])
+    _persist_mod_statuses()
+
+
+# Writes the in-memory mod_statuses to <modloader_dir>/mod_statuses.json so the
+# orchestrator GUI can show live load/fail/disabled state. Best-effort; failures
+# are logged but don't block the load.
+func _persist_mod_statuses() -> void:
+    if _modloader_dir.is_empty():
+        return
+    var path := _modloader_dir.path_join("mod_statuses.json")
+    var f := FileAccess.open(path, FileAccess.WRITE)
+    if f == null:
+        _log_warn("could not write mod_statuses.json at %s" % path)
+        return
+    f.store_string(JSON.stringify(mod_statuses, "  "))
+    f.close()
 
 
 func get_loaded_mod_ids() -> Array[String]:
@@ -258,6 +294,65 @@ func is_blacklisted(mod_id: String) -> bool:
     return _blacklist.has(mod_id)
 
 
+func is_user_disabled(mod_id: String) -> bool:
+    return _user_disabled.get(mod_id, false)
+
+
+# Reads <modloader_dir>/user_profile.json. Schema (godot-mod-loader compatible):
+# { "name": "default", "mod_list": { "<mod_id>": { "enabled": true } } }
+# Mods missing from mod_list default to enabled.
+func _load_user_profile() -> void:
+    _user_disabled.clear()
+    if _modloader_dir.is_empty():
+        return
+    var path := _modloader_dir.path_join("user_profile.json")
+    if not FileAccess.file_exists(path):
+        return
+    var f := FileAccess.open(path, FileAccess.READ)
+    if f == null:
+        return
+    var text := f.get_as_text()
+    f.close()
+    var parsed = JSON.parse_string(text)
+    if typeof(parsed) != TYPE_DICTIONARY:
+        return
+    var mod_list: Dictionary = parsed.get("mod_list", {})
+    for mod_id in mod_list.keys():
+        var entry = mod_list[mod_id]
+        if typeof(entry) != TYPE_DICTIONARY:
+            continue
+        if not bool(entry.get("enabled", true)):
+            _user_disabled[String(mod_id)] = true
+
+
+func _load_mod_hash_index() -> void:
+    _mod_hash_index.clear()
+    if _modloader_dir.is_empty():
+        return
+
+    var path := _modloader_dir.path_join(MOD_HASH_INDEX_FILE)
+    if not FileAccess.file_exists(path):
+        return
+
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        _log_warn("could not read %s" % path)
+        return
+
+    var parsed = JSON.parse_string(file.get_as_text())
+    file.close()
+
+    if not (parsed is Dictionary):
+        _log_warn("ignoring malformed %s" % path)
+        return
+
+    var entries = parsed.get("entries", {})
+    if entries is Dictionary:
+        _mod_hash_index = entries.duplicate(true)
+    else:
+        _log_warn("ignoring %s: entries must be a dictionary" % path)
+
+
 func get_blacklisted_mod_ids() -> Array[String]:
     return _blacklist.duplicate()
 
@@ -283,13 +378,10 @@ func _validate_mod(candidate: Dictionary) -> bool:
     if candidate.get("metadata_missing", false):
         _fail_candidate(candidate, "Missing mod.json metadata", "invalid")
         return false
-    if not bool(meta.get("_has_schema_version", false)):
-        _fail_candidate(candidate, "Missing required manifest field 'schema_version'", "invalid")
-        return false
-
-    var schema_version := int(meta.get("schema_version", 0))
-    if schema_version != SUPPORTED_SCHEMA:
-        _fail_candidate(candidate, "Unsupported mod schema_version %d; expected %d" % [schema_version, SUPPORTED_SCHEMA], "invalid")
+    if not bool(meta.get("_schema_supported", false)):
+        var raw_schema := int(meta.get("_schema_raw", -1))
+        var detail := "missing schema_version/schema marker" if raw_schema < 0 else "schema_version %d" % raw_schema
+        _fail_candidate(candidate, "Unsupported mod schema (%s); expected schema_version %d or one legacy schema back" % [detail, SUPPORTED_SCHEMA], "invalid")
         return false
 
     if not bool(meta.get("_has_id", false)):
@@ -336,6 +428,9 @@ func _validate_mod(candidate: Dictionary) -> bool:
     var req_ver := String(meta.get("required_framework_version", meta.get("loader_version", "*"))).strip_edges()
     if not _version_requirement_satisfied(req_ver, CORE_VERSION):
         _fail_candidate(candidate, "Requires ESP %s, but running %s" % [req_ver, CORE_VERSION], "invalid")
+        return false
+
+    if not _validate_package_hash(candidate):
         return false
 
     if not _game_requirement_satisfied(meta, candidate):
@@ -566,20 +661,18 @@ func _read_candidate_metadata(candidates: Array[Dictionary]) -> void:
 
 
 func _read_pack_metadata(candidate: Dictionary) -> Dictionary:
-    var dir := DirAccess.open("res://mods/")
-    if dir:
-        dir.list_dir_begin()
-        var sub_dir := dir.get_next()
-        while sub_dir != "":
-            if dir.current_is_dir() and not sub_dir.begins_with("."):
-                var meta_path := "res://mods/".path_join(sub_dir).path_join("mod.json")
-                if FileAccess.file_exists(meta_path):
-                    var meta := _read_mod_metadata_from_path(meta_path)
-                    if not meta.is_empty():
-                        meta["_metadata_path"] = meta_path
-                        return meta
-            sub_dir = dir.get_next()
-        dir.list_dir_end()
+    # Read mod.json from the path that belongs to this specific candidate. The
+    # previous implementation iterated res://mods/ and returned the first match,
+    # which when multiple packs are mounted simultaneously could surface the
+    # wrong mod.json for `candidate`.
+    var base_id := String(candidate.get("base_id", "")).strip_edges()
+    if not base_id.is_empty():
+        var meta_path := "res://mods/%s/mod.json" % base_id
+        if FileAccess.file_exists(meta_path):
+            var meta := _read_mod_metadata_from_path(meta_path)
+            if not meta.is_empty():
+                meta["_metadata_path"] = meta_path
+                return meta
 
     if FileAccess.file_exists("res://mod.json"):
         var legacy := _read_mod_metadata_from_path("res://mod.json")
@@ -609,8 +702,9 @@ func _read_mod_metadata_from_path(path: String) -> Dictionary:
 
 func _normalize_metadata(meta: Dictionary, candidate: Dictionary) -> Dictionary:
     var base_id := String(candidate.get("base_id", "unknown"))
+    var schema_info := _resolve_schema_info(meta)
     var author_info := _normalize_author(meta.get("author", "Unknown"))
-    var dependencies := _normalize_dependencies(meta.get("dependencies", []))
+    var dependencies := _normalize_dependencies(meta.get("dependencies", []), meta)
     var framework_requirement := _resolve_framework_requirement(meta, dependencies)
     dependencies.erase("esp")
     dependencies.erase(CORE_MOD_ID)
@@ -619,17 +713,21 @@ func _normalize_metadata(meta: Dictionary, candidate: Dictionary) -> Dictionary:
     var hooks_manifest := _normalize_hooks_manifest(meta.get("hooks", {}))
     var settings_manifest := _normalize_settings_manifest(meta.get("settings", {}))
     var settings_flat := _flatten_settings_manifest(settings_manifest)
+    var package_sha256 := _resolve_manifest_hash(meta)
 
     var normalized := {
-        "schema_version": int(meta.get("schema_version", meta.get("schema", 1))),
-        "schema": int(meta.get("schema_version", meta.get("schema", 1))),
-        "_has_schema_version": meta.has("schema_version"),
+        "schema_version": int(schema_info.get("schema_version", SUPPORTED_SCHEMA)),
+        "schema": int(schema_info.get("schema_version", SUPPORTED_SCHEMA)),
+        "_has_schema_version": bool(schema_info.get("has_schema_marker", false)),
+        "_schema_supported": bool(schema_info.get("supported", false)),
+        "_schema_raw": int(schema_info.get("raw_schema", -1)),
         "_has_id": meta.has("id"),
         "_has_name": meta.has("name"),
         "_has_version": meta.has("version"),
         "_has_description": meta.has("description"),
         "_has_author": _manifest_has_author(meta),
-        "id": String(meta.get("id", base_id)).strip_edges(),
+        "_has_package_sha256": meta.has(PACKAGE_HASH_FIELD) or meta.has("content_sha256") or meta.has("sha256"),
+        "id": String(meta.get("id", base_id)).strip_edges().to_lower(),
         "name": String(meta.get("name", base_id)).strip_edges(),
         "version": String(meta.get("version", "0.0.0")).strip_edges(),
         "loader_version": framework_requirement,
@@ -640,6 +738,7 @@ func _normalize_metadata(meta: Dictionary, candidate: Dictionary) -> Dictionary:
         "author_info": author_info,
         "description": String(meta.get("description", "No description provided.")).strip_edges(),
         "homepage": String(meta.get("homepage", meta.get("docs", meta.get("documentation", "")))).strip_edges(),
+        "repository": _normalize_repository(meta.get("repository", meta.get("repo", ""))),
         "icon": String(meta.get("icon", "")).strip_edges(),
         "tags": _string_array(meta.get("tags", [])),
         "dependencies": dependencies,
@@ -656,7 +755,13 @@ func _normalize_metadata(meta: Dictionary, candidate: Dictionary) -> Dictionary:
         "settings_flat": settings_flat,
         "path": String(candidate.get("path", "")),
         "kind": String(candidate.get("kind", "unknown")),
-        "metadata_path": String(meta.get("_metadata_path", candidate.get("metadata_path", "")))
+        "metadata_path": String(meta.get("_metadata_path", candidate.get("metadata_path", ""))),
+        "package_sha256": package_sha256,
+        "expected_sha256": "",
+        "computed_sha256": "",
+        "verification_status": "pending",
+        "compat_warning": String(schema_info.get("compat_warning", "")).strip_edges(),
+        "migrated_from_schema": int(schema_info.get("migrated_from_schema", -1))
     }
 
     if normalized["id"].is_empty():
@@ -777,6 +882,11 @@ func _game_requirement_satisfied(meta: Dictionary, candidate: Dictionary) -> boo
 
 
 func _validate_dependencies(meta: Dictionary, candidate: Dictionary) -> bool:
+    if meta.has("_dependencies_invalid_type"):
+        _fail_candidate(candidate,
+            "Manifest 'dependencies' must be a dict, array, or string; got type %d" % int(meta.get("_dependencies_invalid_type", -1)),
+            "invalid")
+        return false
     var dependencies: Dictionary = meta.get("dependencies", {})
     for dep_id in dependencies.keys():
         var dep_name := String(dep_id).strip_edges()
@@ -825,16 +935,29 @@ func _validate_hooks_manifest(meta: Dictionary, candidate: Dictionary) -> bool:
 
 func _validate_permissions(meta: Dictionary, candidate: Dictionary) -> bool:
     var permissions: Array[String] = meta.get("permissions", [])
-    var risky_permissions := ["filesystem", "hot_reload", "internet", "patching", "raw_api", "save_access"]
     for permission in permissions:
         if String(permission).strip_edges().is_empty():
             _fail_candidate(candidate, "Permissions must not contain empty values", "invalid")
             return false
         if not KNOWN_PERMISSIONS.has(String(permission)):
             _log_warn("Mod %s declared unknown permission '%s'" % [meta.get("id", "unknown"), permission])
-        elif risky_permissions.has(String(permission)):
-            _log_warn("Mod %s requests permission '%s'; treat this as opt-in/advanced access" % [meta.get("id", "unknown"), permission])
+        elif RISKY_PERMISSIONS.has(String(permission)) and not _is_trusted_framework_candidate(candidate, meta):
+            _fail_candidate(
+                candidate,
+                "Permission '%s' requires a future ESP GUI approval flow and is blocked for external mods." % permission,
+                "invalid"
+            )
+            return false
     return true
+
+
+func _is_trusted_framework_candidate(candidate: Dictionary, meta: Dictionary) -> bool:
+    if bool(meta.get("core", false)) and String(meta.get("id", "")) == CORE_MOD_ID:
+        return true
+    if String(candidate.get("kind", "")) == "core":
+        return true
+    var candidate_path := String(candidate.get("path", "")).strip_edges()
+    return not _core_pack_path.is_empty() and candidate_path == _core_pack_path
 
 
 func _validate_settings_manifest(meta: Dictionary, candidate: Dictionary) -> bool:
@@ -896,7 +1019,7 @@ func _dependencies_have_failed(meta: Dictionary) -> bool:
         var dep_name := String(dep_id)
         var dep_state: Dictionary = mod_statuses.get(dep_name, {})
         var status := String(dep_state.get("status", ""))
-        if status == "failed" or status == "invalid" or status == "errored":
+        if status in ["failed", "invalid", "errored", "disabled", "skipped"]:
             return true
     return false
 
@@ -1060,8 +1183,423 @@ func _normalize_author(value) -> Dictionary:
     }
 
 
-func _normalize_dependencies(value) -> Dictionary:
+# Accepts a bare URL string, a {"url": "...", "type": "git"} dict (npm style),
+# or empty/missing. Returns "" for anything that doesn't look like a URL so
+# downstream UI can treat empty == "no link to show" rather than guarding.
+func _normalize_repository(value) -> String:
+    var raw := ""
+    if value is Dictionary:
+        raw = String(value.get("url", "")).strip_edges()
+    elif value != null:
+        raw = String(value).strip_edges()
+    if raw.is_empty():
+        return ""
+    if raw.begins_with("http://") or raw.begins_with("https://") or raw.begins_with("git+http://") or raw.begins_with("git+https://"):
+        return raw
+    _log_warn("Manifest 'repository' value '%s' is not a recognized URL; ignoring." % raw)
+    return ""
+
+
+func _resolve_schema_info(meta: Dictionary) -> Dictionary:
+    var raw_schema := -1
+    var has_marker := false
+    var compat_warning := ""
+    var migrated_from := -1
+    var supported := false
+
+    if meta.has("schema_version"):
+        raw_schema = int(meta.get("schema_version", -1))
+        has_marker = true
+        supported = raw_schema == SUPPORTED_SCHEMA or raw_schema == LEGACY_SCHEMA
+        if raw_schema == LEGACY_SCHEMA:
+            compat_warning = "Loaded via legacy schema %d compatibility mode; update the mod manifest to schema_version %d." % [LEGACY_SCHEMA, SUPPORTED_SCHEMA]
+            migrated_from = raw_schema
+    elif meta.has("schema"):
+        raw_schema = int(meta.get("schema", -1))
+        has_marker = true
+        supported = raw_schema == SUPPORTED_SCHEMA or raw_schema == LEGACY_SCHEMA
+        compat_warning = "Loaded via legacy manifest field 'schema'; update the mod manifest to schema_version %d." % SUPPORTED_SCHEMA
+        migrated_from = LEGACY_SCHEMA
+    elif _looks_like_legacy_manifest(meta):
+        raw_schema = LEGACY_SCHEMA
+        supported = true
+        compat_warning = "Loaded via legacy manifest compatibility mode; update the mod manifest to schema_version %d." % SUPPORTED_SCHEMA
+        migrated_from = LEGACY_SCHEMA
+
+    return {
+        "schema_version": SUPPORTED_SCHEMA if supported else raw_schema,
+        "raw_schema": raw_schema,
+        "has_schema_marker": has_marker,
+        "supported": supported,
+        "compat_warning": compat_warning,
+        "migrated_from_schema": migrated_from
+    }
+
+
+func _looks_like_legacy_manifest(meta: Dictionary) -> bool:
+    return meta.has("id") and meta.has("name") and meta.has("version") and _manifest_has_author(meta)
+
+
+func _resolve_manifest_hash(meta: Dictionary) -> String:
+    if meta.has(PACKAGE_HASH_FIELD):
+        return String(meta.get(PACKAGE_HASH_FIELD, "")).strip_edges().to_lower()
+    for field_name in LEGACY_HASH_FIELDS:
+        if meta.has(field_name):
+            return String(meta.get(field_name, "")).strip_edges().to_lower()
+    return ""
+
+
+func _validate_package_hash(candidate: Dictionary) -> bool:
+    var meta: Dictionary = candidate.get("meta", {})
+    var expected_info := _lookup_expected_hash(candidate, meta)
+    if not bool(expected_info.get("ok", false)):
+        meta["expected_sha256"] = String(expected_info.get("expected_sha256", ""))
+        meta["verification_status"] = String(expected_info.get("verification_status", "missing_hash_index"))
+        candidate["meta"] = meta
+        _fail_candidate(candidate, String(expected_info.get("reason", "Missing mod hash index entry. Reinstall or update this mod from the ESP GUI.")), "invalid")
+        return false
+
+    meta["expected_sha256"] = String(expected_info.get("expected_sha256", "")).strip_edges().to_lower()
+    var verification := _compute_candidate_hash(candidate, meta)
+    meta["computed_sha256"] = String(verification.get("computed_sha256", "")).strip_edges().to_lower()
+    meta["verification_status"] = String(verification.get("verification_status", "failed")).strip_edges()
+    candidate["meta"] = meta
+
+    if not bool(verification.get("ok", false)):
+        _fail_candidate(candidate, String(verification.get("reason", "Hash verification failed. Reinstall or update this mod from the ESP GUI.")).strip_edges(), "invalid")
+        return false
+
+    return true
+
+
+func _lookup_expected_hash(candidate: Dictionary, meta: Dictionary) -> Dictionary:
+    if _mod_hash_index.is_empty():
+        return {
+            "ok": false,
+            "expected_sha256": "",
+            "verification_status": "missing_hash_index",
+            "reason": "No trusted mod hash index was found. Reinstall or update this mod from the ESP GUI."
+        }
+
+    var entry_key := _candidate_hash_index_key(candidate, meta)
+    var entry = _mod_hash_index.get(entry_key, null)
+    if not (entry is Dictionary):
+        entry = _find_hash_index_entry(candidate, meta)
+
+    if not (entry is Dictionary):
+        return {
+            "ok": false,
+            "expected_sha256": "",
+            "verification_status": "missing_hash_index",
+            "reason": "No trusted hash entry exists for this installed mod. Reinstall or update it from the ESP GUI."
+        }
+
+    var expected := String(entry.get("sha256", "")).strip_edges().to_lower()
+    if not _looks_like_sha256(expected):
+        return {
+            "ok": false,
+            "expected_sha256": expected,
+            "verification_status": "invalid_hash",
+            "reason": "The trusted hash entry for this mod is invalid. Reinstall or update it from the ESP GUI."
+        }
+
+    return {
+        "ok": true,
+        "expected_sha256": expected,
+        "verification_status": "pending",
+        "reason": ""
+    }
+
+
+func _find_hash_index_entry(candidate: Dictionary, meta: Dictionary):
+    var id := String(meta.get("id", candidate.get("base_id", ""))).strip_edges()
+    var version := String(meta.get("version", "0.0.0")).strip_edges()
+    var kind := _hash_index_kind(candidate)
+    var file_name := _candidate_file_name(candidate)
+    for raw_entry in _mod_hash_index.values():
+        if not (raw_entry is Dictionary):
+            continue
+        var entry: Dictionary = raw_entry
+        if String(entry.get("id", "")).strip_edges() != id:
+            continue
+        if String(entry.get("version", "")).strip_edges() != version:
+            continue
+        if String(entry.get("kind", "")).strip_edges() != kind:
+            continue
+        var entry_file_name := String(entry.get("file_name", "")).strip_edges()
+        if entry_file_name.is_empty():
+            entry_file_name = String(entry.get("path", "")).get_file()
+        if entry_file_name == file_name:
+            return entry
+    return null
+
+
+func _candidate_hash_index_key(candidate: Dictionary, meta: Dictionary) -> String:
+    return "%s|%s|%s|%s" % [
+        String(meta.get("id", candidate.get("base_id", ""))).strip_edges(),
+        String(meta.get("version", "0.0.0")).strip_edges(),
+        _hash_index_kind(candidate),
+        _candidate_file_name(candidate)
+    ]
+
+
+func _hash_index_kind(candidate: Dictionary) -> String:
+    var kind := String(candidate.get("kind", "")).strip_edges()
+    return "pack" if kind == "pack" else kind
+
+
+func _candidate_file_name(candidate: Dictionary) -> String:
+    var file_name := String(candidate.get("file_name", "")).strip_edges()
+    if file_name.is_empty():
+        file_name = String(candidate.get("path", "")).get_file()
+    return file_name
+
+
+func _compute_candidate_hash(candidate: Dictionary, meta: Dictionary) -> Dictionary:
+    if String(candidate.get("kind", "")) == "pack":
+        return _compute_pack_file_hash(candidate, meta)
+
+    var root_path := _resolve_candidate_hash_root(candidate, meta)
+    if root_path.is_empty():
+        return {
+            "ok": false,
+            "computed_sha256": "",
+            "verification_status": "unverifiable",
+            "reason": "This mod cannot be hash-verified. Reinstall or update it from the ESP GUI."
+        }
+
+    var collect_errors: Array[String] = []
+    var files := _collect_hashable_files(root_path, collect_errors)
+    if not collect_errors.is_empty():
+        return {
+            "ok": false,
+            "computed_sha256": "",
+            "verification_status": "unreadable",
+            "reason": "Could not enumerate this mod's files for verification: %s. Check filesystem permissions, then reinstall or update from the ESP GUI." % "; ".join(collect_errors)
+        }
+    if files.is_empty():
+        return {
+            "ok": false,
+            "computed_sha256": "",
+            "verification_status": "unverifiable",
+            "reason": "No hashable files were found for this mod. Reinstall or update it from the ESP GUI."
+        }
+
+    var ctx := HashingContext.new()
+    ctx.start(HashingContext.HASH_SHA256)
+    for file_path in files:
+        var rel_path := _hash_relative_path(root_path, file_path)
+        var bytes := _read_hash_bytes(file_path, String(meta.get("metadata_path", "")))
+        if bytes.is_empty() and not _file_is_empty(file_path):
+            return {
+                "ok": false,
+                "computed_sha256": "",
+                "verification_status": "unreadable",
+                "reason": "Could not read '%s' while verifying this mod. Reinstall or update it from the ESP GUI." % rel_path
+            }
+        _hash_update_string(ctx, rel_path)
+        _hash_update_string(ctx, str(bytes.size()))
+        ctx.update(bytes)
+
+    var computed := ctx.finish().hex_encode()
+    var expected := String(meta.get("expected_sha256", "")).strip_edges().to_lower()
+    return {
+        "ok": computed == expected,
+        "computed_sha256": computed,
+        "verification_status": "verified" if computed == expected else "hash_mismatch",
+        "reason": "Hash mismatch for mod '%s'. Expected %s, got %s. Reinstall or update it from the ESP GUI." % [
+            meta.get("name", meta.get("id", "unknown")),
+            expected,
+            computed
+        ]
+    }
+
+
+func _compute_pack_file_hash(candidate: Dictionary, meta: Dictionary) -> Dictionary:
+    var path := String(candidate.get("path", "")).strip_edges()
+    if path.is_empty():
+        return {
+            "ok": false,
+            "computed_sha256": "",
+            "verification_status": "unverifiable",
+            "reason": "This mod pack has no readable file path. Reinstall or update it from the ESP GUI."
+        }
+
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        return {
+            "ok": false,
+            "computed_sha256": "",
+            "verification_status": "unreadable",
+            "reason": "Could not read mod pack '%s'. Reinstall or update it from the ESP GUI." % path
+        }
+
+    var bytes := file.get_buffer(file.get_length())
+    file.close()
+
+    var ctx := HashingContext.new()
+    ctx.start(HashingContext.HASH_SHA256)
+    ctx.update(bytes)
+    var computed := ctx.finish().hex_encode()
+    var expected := String(meta.get("expected_sha256", "")).strip_edges().to_lower()
+    return {
+        "ok": computed == expected,
+        "computed_sha256": computed,
+        "verification_status": "verified" if computed == expected else "hash_mismatch",
+        "reason": "Hash mismatch for mod '%s'. Expected %s, got %s. Reinstall or update it from the ESP GUI." % [
+            meta.get("name", meta.get("id", "unknown")),
+            expected,
+            computed
+        ]
+    }
+
+
+func _resolve_candidate_hash_root(candidate: Dictionary, meta: Dictionary) -> String:
+    if candidate.get("kind", "") == "folder":
+        return String(candidate.get("path", "")).strip_edges()
+
+    var metadata_path := String(meta.get("metadata_path", "")).strip_edges()
+    if metadata_path.begins_with("res://mods/"):
+        return metadata_path.get_base_dir()
+    return ""
+
+
+func _collect_hashable_files(root_path: String, errors: Array[String] = []) -> Array[String]:
+    var files: Array[String] = []
+    _collect_hashable_files_recursive(root_path, root_path, files, errors)
+    files.sort()
+    return files
+
+
+func _collect_hashable_files_recursive(root_path: String, current_path: String, out: Array[String], errors: Array[String] = []) -> void:
+    var dir := DirAccess.open(current_path)
+    if dir == null:
+        var err_code := DirAccess.get_open_error()
+        errors.append("failed to open '%s' (error %d)" % [current_path, int(err_code)])
+        return
+
+    var child_dirs: Array[String] = []
+    var child_files: Array[String] = []
+    dir.list_dir_begin()
+    var entry := dir.get_next()
+    while entry != "":
+        if not entry.begins_with("."):
+            var full_path := current_path.path_join(entry)
+            if dir.current_is_dir():
+                if not _hash_should_ignore_path(_hash_relative_path(root_path, full_path), true):
+                    child_dirs.append(full_path)
+            elif not _hash_should_ignore_path(_hash_relative_path(root_path, full_path), false):
+                child_files.append(full_path)
+        entry = dir.get_next()
+    dir.list_dir_end()
+
+    child_dirs.sort()
+    child_files.sort()
+    for file_path in child_files:
+        out.append(file_path)
+    for dir_path in child_dirs:
+        _collect_hashable_files_recursive(root_path, dir_path, out, errors)
+
+
+func _hash_should_ignore_path(rel_path: String, is_dir: bool) -> bool:
+    var clean := rel_path.replace("\\", "/").strip_edges().to_lower()
+    if clean.is_empty():
+        return true
+    if clean.begins_with("__macosx/") or clean == "__macosx":
+        return true
+    if clean.get_file() in HASH_IGNORE_FILES:
+        return true
+    return is_dir and clean.begins_with(".")
+
+
+func _hash_relative_path(root_path: String, full_path: String) -> String:
+    var root := root_path.replace("\\", "/")
+    while root.ends_with("/"):
+        root = root.substr(0, root.length() - 1)
+    var full := full_path.replace("\\", "/")
+    if full.begins_with(root + "/"):
+        return full.substr(root.length() + 1)
+    return full_path.get_file()
+
+
+func _read_hash_bytes(path: String, metadata_path: String) -> PackedByteArray:
+    if path == metadata_path:
+        var manifest := _read_mod_metadata_from_path(path)
+        if manifest.is_empty():
+            return PackedByteArray()
+        manifest.erase("_metadata_path")
+        manifest.erase(PACKAGE_HASH_FIELD)
+        for field_name in LEGACY_HASH_FIELDS:
+            manifest.erase(field_name)
+        return _canonical_json_stringify(manifest).to_utf8_buffer()
+
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        return PackedByteArray()
+    var bytes := file.get_buffer(file.get_length())
+    file.close()
+    return bytes
+
+
+func _file_is_empty(path: String) -> bool:
+    if not FileAccess.file_exists(path):
+        return false
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        return false
+    var empty := file.get_length() == 0
+    file.close()
+    return empty
+
+
+func _hash_update_string(ctx: HashingContext, value: String) -> void:
+    ctx.update(value.to_utf8_buffer())
+    ctx.update(PackedByteArray([0]))
+
+
+func _canonical_json_stringify(value) -> String:
+    match typeof(value):
+        TYPE_DICTIONARY:
+            var dict: Dictionary = value
+            var keys: Array[String] = []
+            for raw_key in dict.keys():
+                keys.append(String(raw_key))
+            keys.sort()
+            var parts: Array[String] = []
+            for key in keys:
+                parts.append(JSON.stringify(key) + ":" + _canonical_json_stringify(dict.get(key)))
+            return "{" + ",".join(parts) + "}"
+        TYPE_ARRAY:
+            var parts: Array[String] = []
+            for item in value:
+                parts.append(_canonical_json_stringify(item))
+            return "[" + ",".join(parts) + "]"
+        TYPE_STRING:
+            return JSON.stringify(String(value))
+        TYPE_BOOL:
+            return "true" if bool(value) else "false"
+        TYPE_NIL:
+            return "null"
+        _:
+            return JSON.stringify(value)
+
+
+func _looks_like_sha256(value: String) -> bool:
+    if value.length() != 64:
+        return false
+    for i in range(value.length()):
+        var ch := value[i]
+        var is_digit := ch >= "0" and ch <= "9"
+        var is_lower := ch >= "a" and ch <= "f"
+        if not (is_digit or is_lower):
+            return false
+    return true
+
+
+func _normalize_dependencies(value, meta: Dictionary = {}) -> Dictionary:
     var out := {}
+    if value == null:
+        return out
     if value is Dictionary:
         for dep_id in value.keys():
             var dep_name := String(dep_id).strip_edges()
@@ -1085,6 +1623,11 @@ func _normalize_dependencies(value) -> Dictionary:
         var dep_name := String(value).strip_edges()
         if not dep_name.is_empty():
             out[dep_name] = "*"
+    else:
+        # Unknown type (int/bool/float/etc.). Don't silently bypass dependency
+        # checks — stamp a marker so _validate_dependencies fails the mod.
+        if meta is Dictionary:
+            meta["_dependencies_invalid_type"] = typeof(value)
     return out
 
 
@@ -1385,6 +1928,29 @@ func _version_string_looks_valid(version: String) -> bool:
         var is_alpha := (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
         if not is_digit and not is_alpha and ch != "." and ch != "-" and ch != "+" and ch != "_":
             return false
+    # Reject leading zeros in numeric components (e.g. "01.02.03"). Otherwise
+    # "01.02.03" parses to [1,2,3] and compares equal to "1.2.3", which lets
+    # a malicious or careless mod spoof a version match.
+    var split_chars := [".", "-", "+", "_"]
+    var component := ""
+    var i := 0
+    while i <= clean.length():
+        var at_end := i == clean.length()
+        var ch := "" if at_end else clean[i]
+        if at_end or split_chars.has(ch):
+            if component.length() >= 2 and component[0] == "0":
+                var all_digits := true
+                for j in range(component.length()):
+                    var c := component[j]
+                    if c < "0" or c > "9":
+                        all_digits = false
+                        break
+                if all_digits:
+                    return false
+            component = ""
+        else:
+            component += ch
+        i += 1
     return true
 
 
@@ -1428,8 +1994,25 @@ func _parse_version(version: String) -> Array[int]:
 func _resolve_entrypoint_path(entrypoint: String, candidate: Dictionary, meta: Dictionary) -> String:
     if entrypoint.is_empty():
         return ""
-    if entrypoint.begins_with("res://") or entrypoint.begins_with("user://") or entrypoint.begins_with("/"):
-        return entrypoint
+    # Reject absolute paths and parent-directory traversal: a mod must only load
+    # scripts from inside its own scoped directory. Without this a mod could
+    # declare an entrypoint like `res://scripts/core/esp_core.gd` and run as
+    # framework code, or `user://../something.gd` to escape user://.
+    if entrypoint.begins_with("res://") \
+            or entrypoint.begins_with("user://") \
+            or entrypoint.begins_with("/") \
+            or entrypoint.begins_with("\\"):
+        _fail_candidate(candidate,
+            "Entrypoint '%s' must be a relative path inside the mod folder, not absolute." % entrypoint,
+            "invalid")
+        return ""
+    var normalized := entrypoint.replace("\\", "/")
+    for segment in normalized.split("/"):
+        if segment == "..":
+            _fail_candidate(candidate,
+                "Entrypoint '%s' must not contain '..' segments." % entrypoint,
+                "invalid")
+            return ""
 
     if candidate.get("kind", "") == "folder":
         return String(candidate.get("path", "")).path_join(entrypoint)
@@ -1455,13 +2038,18 @@ func _make_status_entry(mod_id: String, meta: Dictionary) -> Dictionary:
         "errors": [],
         "hooks": meta.get("hooks", {}).duplicate(true) if meta.has("hooks") else {},
         "permissions": meta.get("permissions", []).duplicate() if meta.has("permissions") else [],
-        "tags": meta.get("tags", []).duplicate() if meta.has("tags") else []
+        "tags": meta.get("tags", []).duplicate() if meta.has("tags") else [],
+        "expected_sha256": String(meta.get("expected_sha256", "")),
+        "computed_sha256": String(meta.get("computed_sha256", "")),
+        "verification_status": String(meta.get("verification_status", "pending")),
+        "compat_warning": String(meta.get("compat_warning", "")),
+        "migrated_from_schema": int(meta.get("migrated_from_schema", -1))
     }
 
 
 func _set_mod_status(mod_id: String, status: String, meta: Dictionary = {}, reason: String = "") -> void:
     var state: Dictionary = mod_statuses.get(mod_id, _make_status_entry(mod_id, meta))
-    for key in ["name", "version", "author", "description", "path", "kind", "metadata_path", "hooks", "permissions", "tags"]:
+    for key in ["name", "version", "author", "description", "path", "kind", "metadata_path", "hooks", "permissions", "tags", "expected_sha256", "computed_sha256", "verification_status", "compat_warning", "migrated_from_schema"]:
         if meta.has(key):
             state[key] = meta.get(key)
     state["status"] = status
@@ -1513,7 +2101,7 @@ func _update_failed_mod(failure: Dictionary) -> void:
 
 
 func _setup_directories() -> void:
-    for folder in ["user://mods", "user://custom_levels", "user://custom_obstacles", "user://custom_music", "user://esp/logs"]:
+    for folder in ["user://mods", "user://custom_levels", "user://custom_obstacles", "user://custom_music", "user://esp/logs", "user://esp/runtime", "user://esp/editor/backups"]:
         _ensure_dir(folder)
 
 

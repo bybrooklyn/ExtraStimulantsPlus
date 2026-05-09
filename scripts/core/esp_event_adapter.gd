@@ -110,7 +110,10 @@ func _connect_signal(mapping: Dictionary) -> void:
         _log_warn("EventBus signal '%s' is unavailable; event '%s' disabled" % [signal_name, event_name])
         return
 
-    var method_name := "_forward_%d" % clampi(argc, 0, 4)
+    if argc < 0 or argc > 8:
+        _log_warn("EventBus signal '%s' takes %d args; ESP forwarders only handle 0..8 — skipping." % [signal_name, argc])
+        return
+    var method_name := "_forward_%d" % argc
     var callback := Callable(self, method_name).bind(event_name)
     if not event_bus.is_connected(signal_name, callback):
         var err := event_bus.connect(signal_name, callback)
@@ -138,6 +141,22 @@ func _forward_3(a: Variant, b: Variant, c: Variant, event_name: String) -> void:
 
 func _forward_4(a: Variant, b: Variant, c: Variant, d: Variant, event_name: String) -> void:
     _emit_esp_event(event_name, [a, b, c, d])
+
+
+func _forward_5(a: Variant, b: Variant, c: Variant, d: Variant, e: Variant, event_name: String) -> void:
+    _emit_esp_event(event_name, [a, b, c, d, e])
+
+
+func _forward_6(a: Variant, b: Variant, c: Variant, d: Variant, e: Variant, f: Variant, event_name: String) -> void:
+    _emit_esp_event(event_name, [a, b, c, d, e, f])
+
+
+func _forward_7(a: Variant, b: Variant, c: Variant, d: Variant, e: Variant, f: Variant, g: Variant, event_name: String) -> void:
+    _emit_esp_event(event_name, [a, b, c, d, e, f, g])
+
+
+func _forward_8(a: Variant, b: Variant, c: Variant, d: Variant, e: Variant, f: Variant, g: Variant, h: Variant, event_name: String) -> void:
+    _emit_esp_event(event_name, [a, b, c, d, e, f, g, h])
 
 
 func _emit_esp_event(event_name: String, args: Array) -> void:

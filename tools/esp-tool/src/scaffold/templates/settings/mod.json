@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "{{id}}",
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "author": {
+    "name": "{{author}}",
+    "url": "{{author_url}}"
+  },
+  "description": "{{description}}",
+  "repository": "{{repository}}",
+  "required_framework_version": ">=0.0.2",
+  "game_id": "sensory_overload",
+  "game_versions": ">=0.13.0 <0.15.0",
+  "tags": ["gameplay"],
+  "permissions": [],
+  "dependencies": {},
+  "priority": 100,
+  "settings": {
+    "gameplay": {
+      "label": "Gameplay",
+      "settings": {
+        "example": {
+          "label": "Example",
+          "settings": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "label": "Enabled",
+              "description": "Master toggle for this mod's behavior."
+            },
+            "intensity": {
+              "type": "float",
+              "default": 1.0,
+              "min": 0.0,
+              "max": 4.0,
+              "step": 0.1,
+              "label": "Intensity",
+              "description": "Multiplier for the example feature's strength."
+            },
+            "label_text": {
+              "type": "string",
+              "default": "Hello, modders.",
+              "label": "Label text",
+              "description": "Free-form string displayed somewhere by this mod."
+            }
+          }
+        }
+      }
+    }
+  },
+  "entrypoints": ["main.gd"]
+}

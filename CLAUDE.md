@@ -69,7 +69,7 @@ cargo build --release          # produces target/release/esp
 
 The Rust binary `include_bytes!`s `esp_shim/ESPShim.gd`, `esp_bootstrap/ESPBootstrap.gd`, and `esp_bootstrap/override.cfg` from the repo root. **Editing those three files requires rebuilding `esp-tool`** for installer behaviour to change.
 
-`install` writes a `Game.pck.esp-backup` next to the PCK and creates `modloader/`, `mods/`, `levels/` dirs in the game folder. There is no `uninstall` subcommand in the current Rust tool despite older docs — restore from the backup manually.
+`install` writes a `Game.pck.esp-backup` next to the PCK and creates `modloader/`, `mods/`, `levels/` dirs in the game folder. `esp uninstall [path/to/Game.pck]` reverses this: it restores the PCK from the backup (or strips injected files in place if the backup is gone) and removes the three managed directories. The GUI exposes the same flow as an "UNINSTALL" button.
 
 ### Building the core pack
 

@@ -41,7 +41,7 @@ func _scan_for_custom_levels():
     empty_label.visible = false
     level_list.visible = true
     for record in _custom_records:
-        var title := String(record.get("title", record.get("file_name", "Custom Level")))
+        var title := String(record.get("display_title", record.get("title", record.get("file_name", "Custom Level"))))
         if not bool(record.get("valid", false)):
             title += " (invalid)"
         level_list.add_item(title)
@@ -58,7 +58,10 @@ func _on_level_selected(index: int):
     theme_label.text = "Theme: " + String(_selected_record.get("theme", "tornado"))
     var s_path := String(_selected_record.get("song", "res://audio/Song-1.wav"))
     song_label.text = "Song: " + s_path.get_file()
-    obstacle_count_label.text = "Obstacles: " + str(int(_selected_record.get("obstacle_count", 0)))
+    var prefix := ""
+    if String(_selected_record.get("campaign_title", "")).strip_edges() != "":
+        prefix = "Campaign: %s\n" % String(_selected_record.get("campaign_title", ""))
+    obstacle_count_label.text = "%sObstacles: %d" % [prefix, int(_selected_record.get("obstacle_count", 0))]
 
 
 func _on_play_pressed():

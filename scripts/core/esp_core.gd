@@ -37,8 +37,8 @@ func set_boot_info(info: Dictionary) -> void:
 
 func _enter_tree() -> void:
     name = "ESPCore"
-    _apply_script_extensions()
     _install_core_nodes()
+    _apply_script_extensions()
 
 
 func _apply_script_extensions() -> void:
@@ -85,11 +85,20 @@ func _install_core_nodes() -> void:
             "logger": logger
         })
 
+    if level_registry and level_registry.has_method("configure"):
+        level_registry.configure({
+            "logger": logger,
+            "levels_dirs": boot_info.get("levels_dirs", []),
+            "campaigns_dirs": boot_info.get("campaigns_dirs", [])
+        })
+
     if campaign_adapter and campaign_adapter.has_method("configure"):
         campaign_adapter.configure({
             "hooks": hooks,
             "logger": logger,
-            "level_registry": level_registry
+            "level_registry": level_registry,
+            "levels_dirs": boot_info.get("levels_dirs", []),
+            "campaigns_dirs": boot_info.get("campaigns_dirs", [])
         })
 
     if api and api.has_method("configure"):
@@ -103,7 +112,8 @@ func _install_core_nodes() -> void:
             "settings_registry": settings_registry,
             "level_registry": level_registry,
             "event_adapter": event_adapter,
-            "campaign": campaign_adapter
+            "campaign": campaign_adapter,
+            "ui_injector": ui_injector
         })
 
     if mod_loader and mod_loader.has_method("set_core_context"):
@@ -115,7 +125,8 @@ func _install_core_nodes() -> void:
             "event_adapter": event_adapter,
             "campaign": campaign_adapter,
             "level_registry": level_registry,
-            "core_pack_path": boot_info.get("core_pack_path", "")
+            "core_pack_path": boot_info.get("core_pack_path", ""),
+            "modloader_dir": boot_info.get("modloader_dir", "")
         })
 
 

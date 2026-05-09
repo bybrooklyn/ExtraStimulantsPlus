@@ -36,15 +36,18 @@ func refresh():
         child.queue_free()
         
     var mod_loader = _get_esp_mod_loader()
-    if not mod_loader: return
-    
-    # Show active mods
-    for mod in mod_loader.loaded_mods:
-        _add_mod_item(mod, true)
-        
-    # Show blacklisted mods (if any)
-    # We need to scan the directory again to find mods that aren't loaded
-    # For now, let's just show the active ones.
+    if not mod_loader:
+        return
+
+    var statuses := _get_mod_statuses()
+    var mod_ids: Array[String] = []
+    for mod_id in statuses.keys():
+        mod_ids.append(String(mod_id))
+    mod_ids.sort()
+
+    for mod_id in mod_ids:
+        var status: Dictionary = statuses.get(mod_id, {})
+        _add_mod_item(status, not bool(status.get("disabled", false)))
 
 func _add_mod_item(mod: Dictionary, is_active: bool):
     var panel = PanelContainer.new()
@@ -61,7 +64,7 @@ func _add_mod_item(mod: Dictionary, is_active: bool):
     var name_lbl = Label.new()
     name_lbl.text = mod.get("name", "Unnamed Mod") + " v" + mod.get("version", "0.0.0")
     name_lbl.add_theme_font_size_override("font_size", 20)
-    name_lbl.add_theme_color_override("font_color", Color(0.1, 1.0, 0.4))
+    name_lbl.add_theme_color_override("font_color", _status_color(String(mod.get("status", ""))))
     vinfo.add_child(name_lbl)
     
     var auth_lbl = Label.new()
@@ -75,6 +78,38 @@ func _add_mod_item(mod: Dictionary, is_active: bool):
     desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
     desc_lbl.add_theme_font_size_override("font_size", 16)
     vinfo.add_child(desc_lbl)
+
+    var status_lbl = Label.new()
+    status_lbl.text = "Status: %s" % String(mod.get("status", "unknown")).to_upper()
+    status_lbl.add_theme_font_size_override("font_size", 14)
+    status_lbl.add_theme_color_override("font_color", _status_color(String(mod.get("status", ""))))
+    vinfo.add_child(status_lbl)
+
+    var verification_status := String(mod.get("verification_status", "")).strip_edges()
+    if not verification_status.is_empty():
+        var verification_lbl = Label.new()
+        verification_lbl.text = "Verification: %s" % verification_status
+        verification_lbl.add_theme_font_size_override("font_size", 13)
+        verification_lbl.add_theme_color_override("font_color", _verification_color(verification_status))
+        vinfo.add_child(verification_lbl)
+
+    var compat_warning := String(mod.get("compat_warning", "")).strip_edges()
+    if not compat_warning.is_empty():
+        var compat_lbl = Label.new()
+        compat_lbl.text = compat_warning
+        compat_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        compat_lbl.add_theme_font_size_override("font_size", 13)
+        compat_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.4))
+        vinfo.add_child(compat_lbl)
+
+    var reason := String(mod.get("reason", "")).strip_edges()
+    if not reason.is_empty():
+        var reason_lbl = Label.new()
+        reason_lbl.text = reason
+        reason_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+        reason_lbl.add_theme_font_size_override("font_size", 13)
+        reason_lbl.add_theme_color_override("font_color", Color(1.0, 0.6, 0.6))
+        vinfo.add_child(reason_lbl)
     
     var btn_vbox = VBoxContainer.new()
     btn_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -119,3 +154,25 @@ func _has_failed_mods() -> bool:
         if st == "failed" or st == "invalid" or st == "errored":
             return true
     return false
+
+
+func _status_color(status: String) -> Color:
+    match status:
+        "loaded":
+            return Color(0.1, 1.0, 0.4)
+        "failed", "invalid", "errored":
+            return Color(1.0, 0.5, 0.5)
+        "disabled":
+            return Color(0.7, 0.7, 0.7)
+        _:
+            return Color(0.9, 0.85, 0.5)
+
+
+func _verification_color(status: String) -> Color:
+    match status:
+        "verified":
+            return Color(0.1, 0.9, 1.0)
+        "hash_mismatch", "invalid_hash", "missing_hash", "missing_hash_index", "unverifiable", "unreadable":
+            return Color(1.0, 0.5, 0.5)
+        _:
+            return Color(0.8, 0.8, 0.8)

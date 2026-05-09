@@ -16,6 +16,10 @@ const GAME_SINGLETONS := {
     "UiSfxManager": "/root/UiSfxManager",
     "GameAnalytics": "/root/GameAnalytics"
 }
+const SCRIPT_EXTENSION_TARGETS := {
+    "res://scripts/campaign/campaign_level_loader.gd": [],
+    "res://scripts/domains/obstacles/obstacle_manager.gd": ["esp_features"]
+}
 
 class ModsNamespace:
     var _api
@@ -184,6 +188,23 @@ class CampaignNamespace:
             return _api._campaign_node.get_registered_custom_levels()
         return []
 
+    # Procedural generation. Pure data — does not touch disk.
+    # Returns {"sequence": Array, "meta": Dictionary}. See ESPLevelGenerator
+    # for option keys (obstacle_count, gap_min, gap_max, difficulty, date_label).
+    func generate_sequence(seed_value: int, options: Dictionary = {}) -> Dictionary:
+        return ESPLevelGenerator.generate_sequence(seed_value, options)
+
+    # Convenience: generate, write to user://esp/runtime/levels/, and play.
+    # Pass options.play_options to forward into play_custom_level_path
+    # (e.g. {"practice_mode": false}). Returns false if write or launch fails.
+    func play_generated(seed_value: int, options: Dictionary = {}) -> bool:
+        var path := ESPLevelGenerator.write_generated_json(seed_value, options)
+        if path.is_empty():
+            _api.log_warn("ESP.campaign.play_generated: failed to write generated level for seed %d" % seed_value)
+            return false
+        var play_opts: Dictionary = options.get("play_options", {"practice_mode": false})
+        return _api.play_custom_level_path(path, play_opts)
+
 
 class AssetsNamespace:
     var _api
@@ -208,6 +229,80 @@ class AssetsNamespace:
 
     func clear_cache(path: String = "") -> void:
         _api._clear_asset_cache(path)
+
+    # Mod-relative helpers. Mods receive `meta` in their entrypoint callbacks;
+    # passing it here removes the need to hardcode "res://mods/<my_id>/...".
+    # Folder-mounted mods resolve against meta["path"]; packs resolve against
+    # res://mods/<id>/. Mirrors mod_loader._resolve_entrypoint_path.
+    func mod_path(meta: Dictionary) -> String:
+        return _api._resolve_mod_root(meta)
+
+    func resolve(meta: Dictionary, relative: String) -> String:
+        return _api._resolve_mod_relative(meta, relative)
+
+    func load_text(meta: Dictionary, relative: String) -> String:
+        return _api._load_mod_text(meta, relative)
+
+    func load_from_mod(meta: Dictionary, relative: String, use_cache: bool = true):
+        return _api._load_mod_resource(meta, relative, use_cache)
+
+    func script_extension(meta: Dictionary, ext_relative: String, target_res_path: String) -> bool:
+        return _api._apply_script_extension(meta, ext_relative, target_res_path)
+
+
+class UINamespace:
+    var _api
+
+    func _init(api_ref) -> void:
+        _api = api_ref
+
+    # Adds a button to the game's MainMenu MenuContainer. Idempotent per
+    # owner_id: calling twice with the same owner_id returns the existing
+    # button. Options: {"position": "before:CustomMapsButton" | "after:SettingsButton" | "end"}.
+    func inject_main_menu_button(label: String, on_click: Callable, owner_id: String, options: Dictionary = {}) -> Button:
+        if _api._ui_injector_node == null:
+            _api.log_warn("api.ui.inject_main_menu_button: UI injector not ready")
+            return null
+        return _api._ui_injector_node.inject_main_menu_button(label, on_click, owner_id, options)
+
+    # Adds a CanvasLayer overlay during gameplay. Auto-removed on level_completed
+    # or player_died unless options.persistent is true. options.layer = z-index.
+    func inject_hud_overlay(node_or_scene, owner_id: String, options: Dictionary = {}) -> CanvasLayer:
+        if _api._ui_injector_node == null:
+            _api.log_warn("api.ui.inject_hud_overlay: UI injector not ready")
+            return null
+        return _api._ui_injector_node.inject_hud_overlay(node_or_scene, owner_id, options)
+
+    # One-shot listener that fires `callback` the first time a node with the
+    # given name (or matching path suffix) appears in the SceneTree.
+    # options.timeout_ms: defaults to 5000.
+    func wait_for_node(name_or_path: String, callback: Callable, options: Dictionary = {}) -> void:
+        if _api._ui_injector_node == null:
+            _api.log_warn("api.ui.wait_for_node: UI injector not ready")
+            return
+        _api._ui_injector_node.wait_for_node(name_or_path, callback, options)
+
+    # Custom settings tab beyond the auto-generated MODS tab. Reserved for a
+    # future pass; currently logs a notice and routes through the declarative
+    # mod.json::settings path which works today.
+    func inject_settings_tab(label: String, _build_fn: Callable, owner_id: String) -> Control:
+        _api.log_warn("api.ui.inject_settings_tab: not yet implemented (label=%s, owner=%s) — declare typed settings in mod.json instead" % [label, owner_id])
+        return null
+
+    func set_badge_visible(visible: bool) -> void:
+        if _api._ui_injector_node and _api._ui_injector_node.has_method("set_badge_visible"):
+            _api._ui_injector_node.set_badge_visible(visible)
+
+    func set_badge_color(c: Color) -> void:
+        if _api._ui_injector_node and _api._ui_injector_node.has_method("set_badge_color"):
+            _api._ui_injector_node.set_badge_color(c)
+
+    # Returns the framework's accent color (resolved from the menu theme if
+    # available). Mods can use this to make their UI feel native.
+    func get_theme_accent() -> Color:
+        if _api._ui_injector_node and _api._ui_injector_node.has_method("get_theme_accent"):
+            return _api._ui_injector_node.get_theme_accent()
+        return Color(0.1, 0.8, 1.0, 1.0)
 
 
 class SavesNamespace:
@@ -236,6 +331,8 @@ var logger: Node
 var audio: Node
 var ghost: Node
 var mutators: Node
+var level_registry: Node
+var settings_registry: Node
 
 var mods
 var settings
@@ -245,6 +342,7 @@ var game
 var campaign
 var assets
 var saves
+var ui
 
 var _mods_node: Node
 var _settings_node: Node
@@ -253,6 +351,7 @@ var _level_registry_node: Node
 var _hooks_node: Node
 var _event_adapter_node: Node
 var _campaign_node: Node
+var _ui_injector_node: Node
 var _asset_cache: Dictionary = {}
 var _save_config: ConfigFile = ConfigFile.new()
 
@@ -271,8 +370,12 @@ func configure(parts: Dictionary) -> void:
     _hooks_node = parts.get("events", parts.get("hooks"))
     _event_adapter_node = parts.get("event_adapter")
     _campaign_node = parts.get("campaign")
+    _ui_injector_node = parts.get("ui_injector")
 
     _save_config.load(SAVE_DATA_PATH)
+
+    level_registry = _level_registry_node
+    settings_registry = _settings_registry_node
 
     mods = ModsNamespace.new(self)
     settings = SettingsNamespace.new(self)
@@ -282,6 +385,7 @@ func configure(parts: Dictionary) -> void:
     campaign = CampaignNamespace.new(self)
     assets = AssetsNamespace.new(self)
     saves = SavesNamespace.new(self)
+    ui = UINamespace.new(self)
 
 
 func register_setting(mod_id: String, key: String, type: int, default_value, options: Dictionary = {}) -> void:
@@ -567,6 +671,122 @@ func _load_asset(path: String, use_cache: bool = true):
     return resource
 
 
+func _resolve_mod_root(meta: Dictionary) -> String:
+    var kind := String(meta.get("kind", "")).to_lower()
+    var path := String(meta.get("path", ""))
+    if kind == "folder" and not path.is_empty():
+        return path.trim_suffix("/")
+    var mod_id := String(meta.get("id", "")).strip_edges()
+    if mod_id.is_empty():
+        log_warn("Cannot resolve mod root: meta has neither 'path' (folder) nor 'id'")
+        return ""
+    return "res://mods".path_join(mod_id)
+
+
+func _resolve_mod_relative(meta: Dictionary, relative: String) -> String:
+    var rel := relative.strip_edges()
+    if rel.begins_with("res://") or rel.begins_with("user://") or rel.begins_with("/"):
+        return rel
+    var root := _resolve_mod_root(meta)
+    if root.is_empty():
+        return ""
+    if rel.is_empty():
+        return root
+    return root.path_join(rel)
+
+
+func _load_mod_text(meta: Dictionary, relative: String) -> String:
+    var path := _resolve_mod_relative(meta, relative)
+    if path.is_empty():
+        return ""
+    if not FileAccess.file_exists(path):
+        log_warn("Mod text file not found: %s" % path)
+        return ""
+    var f := FileAccess.open(path, FileAccess.READ)
+    if f == null:
+        log_warn("Cannot open mod text file: %s" % path)
+        return ""
+    var contents := f.get_as_text()
+    f.close()
+    return contents
+
+
+func _load_mod_resource(meta: Dictionary, relative: String, use_cache: bool = true):
+    var path := _resolve_mod_relative(meta, relative)
+    if path.is_empty():
+        return null
+    return _load_asset(path, use_cache)
+
+
+func _apply_script_extension(meta: Dictionary, ext_relative: String, target_res_path: String) -> bool:
+    var target_path := _normalize_resource_path(target_res_path)
+    if target_path.is_empty() or not SCRIPT_EXTENSION_TARGETS.has(target_path):
+        log_error("script_extension: target '%s' is not an approved extension point" % target_res_path)
+        return false
+
+    var mod_id := String(meta.get("id", "")).strip_edges()
+    var allowed_mods: Array = SCRIPT_EXTENSION_TARGETS.get(target_path, [])
+    if not allowed_mods.is_empty() and not allowed_mods.has(mod_id):
+        log_error("script_extension: mod '%s' cannot extend '%s'" % [mod_id, target_path])
+        return false
+
+    if not bool(meta.get("core", false)) and not _meta_has_permission(meta, "patching"):
+        log_error("script_extension: mod '%s' must declare the 'patching' permission" % mod_id)
+        return false
+
+    var ext_path := _resolve_mod_relative_confined(meta, ext_relative)
+    if ext_path.is_empty():
+        return false
+    var script: Script = load(ext_path)
+    if script == null:
+        log_error("script_extension: failed to load '%s'" % ext_path)
+        return false
+    script.take_over_path(target_path)
+    log_info("script_extension: %s -> %s" % [ext_path, target_path])
+    return true
+
+
+func _normalize_resource_path(path: String) -> String:
+    var clean := path.strip_edges().replace("\\", "/")
+    if clean.is_empty() or not clean.begins_with("res://"):
+        return ""
+    for segment in clean.split("/"):
+        if segment == "..":
+            return ""
+    return clean
+
+
+func _resolve_mod_relative_confined(meta: Dictionary, relative: String) -> String:
+    var rel := relative.strip_edges().replace("\\", "/")
+    if rel.is_empty() or rel.begins_with("res://") or rel.begins_with("user://") or rel.begins_with("/"):
+        log_error("script_extension: extension source must be relative to the mod")
+        return ""
+    for segment in rel.split("/"):
+        if segment == "..":
+            log_error("script_extension: extension source must not contain '..'")
+            return ""
+
+    var root := _resolve_mod_root(meta)
+    if root.is_empty():
+        return ""
+    var path := root.path_join(rel)
+    if not _path_is_inside(path, root):
+        log_error("script_extension: extension source escaped the mod root")
+        return ""
+    return path
+
+
+func _path_is_inside(path: String, root: String) -> bool:
+    var clean_path := path.strip_edges().replace("\\", "/")
+    var clean_root := root.strip_edges().replace("\\", "/").trim_suffix("/")
+    return clean_path == clean_root or clean_path.begins_with(clean_root + "/")
+
+
+func _meta_has_permission(meta: Dictionary, permission: String) -> bool:
+    var permissions: Array = meta.get("permissions", [])
+    return permissions.has(permission)
+
+
 func _clear_asset_cache(path: String = "") -> void:
     var clean := path.strip_edges()
     if clean.is_empty():
@@ -575,17 +795,44 @@ func _clear_asset_cache(path: String = "") -> void:
     _asset_cache.erase(clean)
 
 
+# Reject section names / keys containing characters that would corrupt the
+# ConfigFile on disk or let one mod write into another's section. Mirrors the
+# loader's mod-id charset (lowercase + digits + . _ -) but is permissive about
+# case for keys (mods may use camelCase keys).
+func _is_valid_save_id(s: String) -> bool:
+    if s.is_empty() or s.length() > 128:
+        return false
+    for i in range(s.length()):
+        var ch := s[i]
+        var ok := (ch >= "a" and ch <= "z") \
+            or (ch >= "A" and ch <= "Z") \
+            or (ch >= "0" and ch <= "9") \
+            or ch == "." or ch == "_" or ch == "-"
+        if not ok:
+            return false
+    return true
+
+
 func _get_save_value(mod_id: String, key: String, fallback = null):
+    if not _is_valid_save_id(mod_id) or not _is_valid_save_id(key):
+        log_warn("api.saves.get_data: rejected unsafe section/key '%s' / '%s'" % [mod_id, key])
+        return fallback
     return _save_config.get_value(mod_id, key, fallback)
 
 
 func _set_save_value(mod_id: String, key: String, value) -> void:
+    if not _is_valid_save_id(mod_id) or not _is_valid_save_id(key):
+        log_warn("api.saves.set_data: rejected unsafe section/key '%s' / '%s'" % [mod_id, key])
+        return
     _save_config.set_value(mod_id, key, value)
     _save_config.save(SAVE_DATA_PATH)
 
 
 func _get_mod_save_data(mod_id: String) -> Dictionary:
     var data := {}
+    if not _is_valid_save_id(mod_id):
+        log_warn("api.saves.get_mod_data: rejected unsafe mod_id '%s'" % mod_id)
+        return data
     if not _save_config.has_section(mod_id):
         return data
     for key in _save_config.get_section_keys(mod_id):
@@ -594,9 +841,15 @@ func _get_mod_save_data(mod_id: String) -> Dictionary:
 
 
 func _erase_save_value(mod_id: String, key: String = "") -> void:
+    if not _is_valid_save_id(mod_id):
+        log_warn("api.saves.erase_data: rejected unsafe mod_id '%s'" % mod_id)
+        return
     if key.strip_edges().is_empty():
         _save_config.erase_section(mod_id)
     else:
+        if not _is_valid_save_id(key):
+            log_warn("api.saves.erase_data: rejected unsafe key '%s'" % key)
+            return
         _save_config.erase_section_key(mod_id, key)
     _save_config.save(SAVE_DATA_PATH)
 

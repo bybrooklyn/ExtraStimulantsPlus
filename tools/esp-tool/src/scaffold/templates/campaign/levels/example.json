@@ -1,0 +1,7 @@
+{
+  "name": "{{name}} — Example Level",
+  "version": 1,
+  "tempo_bpm": 120,
+  "obstacles": [],
+  "_doc": "Replace `obstacles` with the level's actual sequence. The framework's obstacle_sequence_serializer.gd defines the schema; the bundled level editor (CUSTOM MAPS button in the main menu) writes files in this format. Easiest path: design a level in the editor, export it, drop the JSON into this folder."
+}

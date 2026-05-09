@@ -77,7 +77,10 @@ func _start_core_loader() -> void:
         loader.set_boot_info({
             "shim_version": SHIM_VERSION,
             "core_pack_path": _core_pack_path,
-            "mods_dirs": _get_mod_dirs()
+            "mods_dirs": _get_mod_dirs(),
+            "modloader_dir": _resolve_modloader_dir(),
+            "levels_dirs": _get_content_dirs("levels"),
+            "campaigns_dirs": _get_content_dirs("campaigns")
         })
 
     root.add_child(loader)
@@ -95,9 +98,14 @@ func _get_mod_dirs() -> Array[String]:
     _append_unique(dirs, exe_dir.path_join("mods"))
 
     if OS.get_name() == "macOS":
-        var contents_dir := exe_dir.get_base_dir()
-        var app_root := contents_dir.get_base_dir()
-        var beside_app := app_root.get_base_dir()
+        var contents_dir := exe_dir.get_base_dir()           # .app/Contents
+        var resources_dir := contents_dir.path_join("Resources")
+        var app_root := contents_dir.get_base_dir()          # .app
+        var beside_app := app_root.get_base_dir()            # parent of .app
+        # Priority: where `esp install` actually wrote things (next to PCK).
+        _append_unique(dirs, resources_dir.path_join("modloader"))
+        _append_unique(dirs, resources_dir.path_join("mods"))
+        # Legacy fallbacks, kept for users who installed outside the bundle.
         _append_unique(dirs, app_root.path_join("modloader"))
         _append_unique(dirs, app_root.path_join("mods"))
         _append_unique(dirs, beside_app.path_join("mods"))
@@ -106,6 +114,50 @@ func _get_mod_dirs() -> Array[String]:
     _append_unique(dirs, OS.get_user_data_dir().path_join("mods"))
 
     return dirs
+
+
+func _get_content_dirs(folder_name: String) -> Array[String]:
+    var dirs: Array[String] = []
+    var exe_dir := OS.get_executable_path().get_base_dir()
+    _append_unique(dirs, exe_dir.path_join(folder_name))
+
+    if OS.get_name() == "macOS":
+        var contents_dir := exe_dir.get_base_dir()           # .app/Contents
+        var resources_dir := contents_dir.path_join("Resources")
+        var app_root := contents_dir.get_base_dir()          # .app
+        var beside_app := app_root.get_base_dir()
+        _append_unique(dirs, resources_dir.path_join(folder_name))
+        _append_unique(dirs, app_root.path_join(folder_name))
+        _append_unique(dirs, beside_app.path_join(folder_name))
+
+    _append_unique(dirs, OS.get_user_data_dir().path_join(folder_name))
+    for path in dirs:
+        _ensure_dir(path)
+    return dirs
+
+
+# Mirrors the macOS candidate set in _get_mod_dirs(). Picks the first existing
+# modloader/ directory so we read user_profile.json / write mod_statuses.json
+# in the same place the Rust orchestrator wrote them. Falls back to exe-dir
+# on a fresh install where no candidate exists yet.
+func _resolve_modloader_dir() -> String:
+    var exe_dir := OS.get_executable_path().get_base_dir()
+    var candidates: Array[String] = [exe_dir.path_join("modloader")]
+    if OS.get_name() == "macOS":
+        var contents_dir := exe_dir.get_base_dir()
+        candidates.append(contents_dir.path_join("Resources/modloader"))
+        candidates.append(contents_dir.get_base_dir().path_join("modloader"))  # .app/modloader
+    for path in candidates:
+        if DirAccess.dir_exists_absolute(path):
+            return path
+    # No existing candidate — try to create the primary one so callers get a
+    # path that actually resolves. If creation fails, return "" so the caller
+    # can bail out instead of silently writing into a nonexistent dir.
+    var err := DirAccess.make_dir_recursive_absolute(candidates[0])
+    if err == OK or DirAccess.dir_exists_absolute(candidates[0]):
+        return candidates[0]
+    push_warning("[ESP Shim] failed to create modloader dir %s: %s" % [candidates[0], str(err)])
+    return ""
 
 
 func _append_unique(list: Array[String], value: String) -> void:

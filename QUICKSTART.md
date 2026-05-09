@@ -8,7 +8,7 @@ This source tree is the rewritten shim-loader version.
 - `scripts/core/esp_core.gd` starts the real external core after the shim mounts `mods/ExtraStimulantsPlus.zip`.
 - `scripts/core/mod_loader.gd` scans and loads other external mods.
 - `dist/ExtraStimulantsPlus.zip` is the ready-to-drop external core pack.
-- `tools/esp-installer-rs/` is the Rust installer scaffold intended to replace Python patching.
+- `tools/esp-tool/` is the Rust orchestrator binary (`esp`) that handles installing, updating, mod management, and launching.
 
 ## Install shape
 

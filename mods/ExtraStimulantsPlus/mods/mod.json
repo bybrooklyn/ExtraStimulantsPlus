@@ -8,6 +8,8 @@
     "url": "https://github.com/bybrooklyn"
   },
   "description": "Built-in ExtraStimulantsPlus gameplay, editor, and utility features.",
+  "homepage": "https://github.com/bybrooklyn/extrastimulantsplus",
+  "repository": "https://github.com/bybrooklyn/extrastimulantsplus",
   "required_framework_version": ">=0.0.2",
   "game_id": "sensory_overload",
   "game_versions": ">=0.13.0 <0.15.0",
@@ -22,6 +24,13 @@
         "rt": {
           "label": "Path Tracing (Beta)",
           "settings": {
+            "preset": {
+              "type": "string",
+              "default": "gameplay",
+              "choices": ["off", "gameplay", "cinematic", "custom"],
+              "label": "Preset",
+              "description": "off = disabled. gameplay = 1spp + light denoise (default). cinematic = 4spp + heavier denoise. custom = use the per-knob sliders below."
+            },
             "enabled": {
               "type": "boolean",
               "default": false,
@@ -58,11 +67,134 @@
               "label": "Indirect intensity",
               "description": "Blend weight of the indirect light onto the base color (0 = none, 1 = full)."
             },
-            "half_res": {
+            "sky_color_r": {
+              "type": "float",
+              "default": 0.4,
+              "min": 0.0,
+              "max": 1.0,
+              "label": "Sky red",
+              "description": "Red component of the miss-ray fallback color (corners no longer go black)."
+            },
+            "sky_color_g": {
+              "type": "float",
+              "default": 0.5,
+              "min": 0.0,
+              "max": 1.0,
+              "label": "Sky green",
+              "description": "Green component of the miss-ray fallback color."
+            },
+            "sky_color_b": {
+              "type": "float",
+              "default": 0.6,
+              "min": 0.0,
+              "max": 1.0,
+              "label": "Sky blue",
+              "description": "Blue component of the miss-ray fallback color."
+            },
+            "sky_intensity": {
+              "type": "float",
+              "default": 0.3,
+              "min": 0.0,
+              "max": 2.0,
+              "label": "Sky intensity",
+              "description": "Multiplier on the miss-ray sky color. 0 = black miss; 1 = neutral; >1 punches it up."
+            },
+            "temporal_alpha_max": {
+              "type": "int",
+              "default": 32,
+              "min": 1,
+              "max": 64,
+              "label": "History length",
+              "description": "Cap on temporal accumulation. Higher = cleaner but more lag on disocclusion. 1 disables history."
+            },
+            "atrous_iterations": {
+              "type": "int",
+              "default": 3,
+              "min": 0,
+              "max": 5,
+              "label": "Denoise iterations",
+              "description": "À-trous denoise passes. 0 disables denoise (just temporal), 3 is the recommended sweet spot."
+            }
+          }
+        }
+      }
+    },
+    "audio": {
+      "label": "Audio",
+      "settings": {
+        "visualizer": {
+          "label": "Spectrum Visualizer",
+          "settings": {
+            "enabled": {
               "type": "boolean",
               "default": true,
-              "label": "Half resolution",
-              "description": "Dispatch at half-resolution. Recommended on; turn off only with strong GPU."
+              "label": "Enabled",
+              "description": "Run real-time spectrum analysis on the Music bus during gameplay. Drives the 'mod_music_pulse' shader global."
+            },
+            "smoothing": {
+              "type": "float",
+              "default": 0.5,
+              "min": 0.0,
+              "max": 1.0,
+              "label": "Smoothing",
+              "description": "0 = snappy/twitchy response, 1 = heavy temporal smoothing of band energies."
+            },
+            "gain": {
+              "type": "float",
+              "default": 1.0,
+              "min": 0.0,
+              "max": 4.0,
+              "label": "Reactivity gain",
+              "description": "Multiplier applied to the bass-pulse value before it reaches shaders."
+            }
+          }
+        }
+      }
+    },
+    "gameplay": {
+      "label": "Gameplay",
+      "settings": {
+        "ghost": {
+          "label": "Ghost Recorder",
+          "settings": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "label": "Record ghosts",
+              "description": "Record player position/rotation each level for replay. Discards on death; saves on completion."
+            },
+            "record_interval": {
+              "type": "int",
+              "default": 3,
+              "min": 1,
+              "max": 30,
+              "label": "Record every N frames",
+              "description": "Lower = denser keyframes (more disk, smoother replay). Default 3 keeps file size reasonable."
+            },
+            "keep_n_ghosts": {
+              "type": "int",
+              "default": 3,
+              "min": 1,
+              "max": 50,
+              "label": "Ghosts per level",
+              "description": "Maximum ghosts retained per level before older recordings get pruned (future use)."
+            }
+          }
+        },
+        "mutators": {
+          "label": "Mutators",
+          "settings": {
+            "mirror_mode": {
+              "type": "boolean",
+              "default": false,
+              "label": "Mirror Mode",
+              "description": "Swaps left/right player input. Pure horizontal reversal; takes effect immediately."
+            },
+            "turbo_mode": {
+              "type": "boolean",
+              "default": false,
+              "label": "Turbo Mode",
+              "description": "Runs the game at 1.2x time scale. Toggle anytime; resets to 1.0x on level end."
             }
           }
         }

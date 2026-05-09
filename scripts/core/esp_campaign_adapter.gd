@@ -8,11 +8,26 @@ signal custom_level_play_started(level_def: CampaignLevelDef, source_path: Strin
 
 const DEFAULT_THEME := "tornado"
 const DEFAULT_SONG := "res://audio/Song-1.wav"
-const DEFAULT_RUNTIME_DIR := "user://custom_levels/runtime"
+const DEFAULT_RUNTIME_DIR := "user://esp/runtime/levels"
+
+# Allowlists for resource paths that mod-supplied level metadata can name
+# directly. Anything outside falls back to the default. Without this, a mod
+# could pass `res://scripts/core/esp_core.gd` as a "theme" and force load()
+# to deserialize arbitrary framework resources.
+const SAFE_THEME_PREFIXES: Array[String] = [
+    "res://resources/themes/",
+]
+const SAFE_THEME_EXTS: Array[String] = ["tres", "res"]
+const SAFE_SONG_PREFIXES: Array[String] = [
+    "res://audio/",
+]
+const SAFE_SONG_EXTS: Array[String] = ["wav", "ogg", "mp3"]
 
 var logger: Node
 var hooks: Node
 var level_registry: Node
+var levels_dirs: Array[String] = []
+var campaigns_dirs: Array[String] = []
 
 var registered_custom_levels: Array[CampaignLevelDef] = []
 var custom_level_sources: Dictionary = {}
@@ -22,6 +37,8 @@ func configure(parts: Dictionary) -> void:
     logger = parts.get("logger", logger)
     hooks = parts.get("hooks", hooks)
     level_registry = parts.get("level_registry", level_registry)
+    levels_dirs = parts.get("levels_dirs", levels_dirs)
+    campaigns_dirs = parts.get("campaigns_dirs", campaigns_dirs)
 
 
 func register_custom_level(level_def: CampaignLevelDef, source_path: String = "") -> bool:
@@ -222,7 +239,13 @@ func _load_theme(theme_name: String) -> Resource:
     var clean := theme_name.strip_edges()
     if clean.is_empty():
         clean = DEFAULT_THEME
-    var path := clean if clean.begins_with("res://") or clean.begins_with("user://") else "res://resources/themes/%s.tres" % clean
+    # Short name (no scheme) maps to the canonical theme directory.
+    var path := clean
+    if not (clean.begins_with("res://") or clean.begins_with("user://")):
+        path = "res://resources/themes/%s.tres" % clean
+    if not _is_safe_resource_path(path, SAFE_THEME_PREFIXES, SAFE_THEME_EXTS):
+        _log_warn("Theme path '%s' is outside the allowed prefixes; falling back to default" % path)
+        path = "res://resources/themes/%s.tres" % DEFAULT_THEME
     var theme = load(path)
     if theme == null:
         _log_warn("Could not load theme '%s'" % path)
@@ -242,11 +265,33 @@ func _load_song(song_path: String) -> AudioStream:
         _log_warn("Could not load external song '%s'" % clean)
         return null
 
+    if not _is_safe_resource_path(clean, SAFE_SONG_PREFIXES, SAFE_SONG_EXTS):
+        _log_warn("Song path '%s' is outside the allowed prefixes; falling back to default" % clean)
+        clean = DEFAULT_SONG
+
     var song = load(clean)
     if song is AudioStream:
         return song
     _log_warn("Could not load song '%s'" % clean)
     return null
+
+
+# Returns true iff `path` begins with one of `allowed_prefixes` AND has an
+# extension in `allowed_exts`. Rejects `..` segments and anything that doesn't
+# match the expected shape — defense-in-depth against `load()` being called
+# on attacker-supplied paths.
+func _is_safe_resource_path(path: String, allowed_prefixes: Array[String], allowed_exts: Array[String]) -> bool:
+    if path.is_empty() or path.contains(".."):
+        return false
+    var prefix_ok := false
+    for prefix in allowed_prefixes:
+        if path.begins_with(prefix):
+            prefix_ok = true
+            break
+    if not prefix_ok:
+        return false
+    var ext := path.get_extension().to_lower()
+    return allowed_exts.has(ext)
 
 
 func _estimate_length_rings(sequence: Array) -> int:

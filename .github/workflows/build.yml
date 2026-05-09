@@ -1,0 +1,123 @@
+name: build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+
+# Default to read-only for every job. The release job opts back in to write
+# below — keeps the GITHUB_TOKEN minimally privileged on PRs and pushes.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Sensory Overload has no native macOS build, so esp-tool isn't
+          # shipped for Mac. Mac developers can still `cargo build` locally
+          # for `esp pack` / `esp create` mod authoring; install/launch are
+          # gated at runtime with a clear error.
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: esp.exe
+            archive: esp-windows-x86_64.zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: esp
+            archive: esp-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/esp-tool
+
+      - name: Install Linux GUI deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - name: Build
+        working-directory: tools/esp-tool
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp tools/esp-tool/target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/
+          cd dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a "${{ matrix.archive }}" "${{ matrix.artifact }}"
+          else
+            tar -czf "${{ matrix.archive }}" "${{ matrix.artifact }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: dist/${{ matrix.archive }}
+
+  framework-pack:
+    name: pack framework zip
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ExtraStimulantsPlus.zip
+        run: |
+          # Pack the bundled core mod + framework scripts into the asset that
+          # esp-tool downloads at install time. Using `zip -r` (not the just-built
+          # binary) keeps this job independent of the cross-platform build matrix.
+          mkdir -p staging
+          cp -r mods/ExtraStimulantsPlus/mods/* staging/
+          # Also include the public scripts the shim mounts as the core pack.
+          cp -r scripts staging/
+          (cd staging && zip -r ../ExtraStimulantsPlus.zip .)
+          sha256sum ExtraStimulantsPlus.zip | awk '{print $1}' > ExtraStimulantsPlus.zip.sha256
+          ls -lh ExtraStimulantsPlus.zip ExtraStimulantsPlus.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExtraStimulantsPlus
+          path: |
+            ExtraStimulantsPlus.zip
+            ExtraStimulantsPlus.zip.sha256
+
+  release:
+    name: publish release
+    needs: [build, framework-pack]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List staged release assets
+        run: ls -lhR dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/esp-windows-x86_64.zip
+            dist/esp-linux-x86_64.tar.gz
+            dist/ExtraStimulantsPlus.zip
+            dist/ExtraStimulantsPlus.zip.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
